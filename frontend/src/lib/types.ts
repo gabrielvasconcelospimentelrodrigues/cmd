@@ -122,6 +122,12 @@ export interface Plano {
   mensal: number;
   taxas_empresa: number;
   total_unico: number;
+  proximo_terminal?: number;
+  precos?: {
+    implantacao: number;
+    terminais: number[];
+    adicional: number;
+  };
 }
 
 export interface Fatura {
