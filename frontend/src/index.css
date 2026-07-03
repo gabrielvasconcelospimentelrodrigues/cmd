@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+}
+body {
+  @apply bg-neutral-50 text-neutral-800 antialiased;
+}
+
+@layer components {
+  .card {
+    @apply bg-white border border-neutral-200/80 rounded-2xl;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.06);
+  }
+  .input {
+    @apply w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm
+      placeholder:text-neutral-400 transition
+      focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20;
+  }
+  .label {
+    @apply block text-xs font-medium text-neutral-500 mb-1.5;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl text-sm font-medium
+      transition disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-brand-600 text-white px-4 py-2.5 hover:bg-brand-700
+      shadow-sm shadow-brand-600/20;
+  }
+  .btn-ghost {
+    @apply btn px-3 py-2 text-neutral-600 hover:bg-neutral-100;
+  }
+  .btn-outline {
+    @apply btn px-4 py-2.5 border border-neutral-300 text-neutral-700 hover:bg-neutral-50;
+  }
+
+  /* ---- Tema dark (auth + onboarding) ------------------------------------ */
+  .field-dark {
+    @apply w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white
+      placeholder:text-slate-500 transition
+      focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25;
+  }
+  .btn-blue {
+    @apply btn bg-blue-600 px-5 py-3 text-white hover:bg-blue-500 shadow-lg shadow-blue-600/25;
+  }
+  .btn-dark-outline {
+    @apply btn px-5 py-3 border border-white/15 text-slate-300 hover:bg-white/5;
+  }
+}
+
+/* =========================================================================
+   IACMD — design system de Acesso & Onboarding (do Claude Design)
+   ========================================================================= */
+.iacmd {
+  --c-bg: #070b16; --c-surface: #0f1a30; --c-surface2: #0b1322;
+  --c-ink: #fff; --c-ink2: #b7c2da; --c-ink3: #7a89a6;
+  --c-border: rgba(255, 255, 255, 0.08); --c-border2: rgba(255, 255, 255, 0.16);
+  --c-blue: #3b82f6; --c-blued: #2563eb; --c-cyan: #38bdf8;
+  --c-soft: rgba(56, 189, 248, 0.1); --c-softfg: #7dd3fc;
+  --c-glow: rgba(37, 99, 235, 0.3);
+  --c-ok: #34d399; --c-okfg: #6ee7b7; --c-oksoft: rgba(52, 211, 153, 0.16);
+  --c-warn: #fbbf24; --c-warnsoft: rgba(251, 191, 36, 0.12); --c-warnfg: #fcd34d;
+  --c-err: #f87171; --c-errsoft: rgba(248, 113, 113, 0.12); --c-errfg: #fca5a5;
+  --c-side: #0a1322; --c-softb: rgba(56, 189, 248, 0.22); --c-active: rgba(56, 189, 248, 0.12);
+  --c-side-ink: #fff; --c-side-ink2: rgba(255, 255, 255, 0.6); --c-side-ink3: rgba(255, 255, 255, 0.4);
+  --c-side-active-bg: rgba(56, 189, 248, 0.12); --c-side-active-ink: #fff; --c-side-border: rgba(255, 255, 255, 0.08);
+  --c-nav: rgba(7, 11, 22, 0.72); --c-cardsh: 0 16px 40px rgba(0, 0, 0, 0.35);
+  --c-shadow: 0 24px 60px rgba(0, 0, 0, 0.55); --c-input: rgba(255, 255, 255, 0.04);
+  font-family: 'Plus Jakarta Sans', Inter, sans-serif;
+  background: var(--c-bg); color: var(--c-ink); min-height: 100vh;
+  position: relative; overflow-x: hidden;
+  transition: background 0.3s ease, color 0.3s ease;
+}
+.iacmd[data-theme='light'] {
+  --c-bg: #eef2f9; --c-surface: #fff; --c-surface2: #f8fafe;
+  --c-ink: #0f1b33; --c-ink2: #51607a; --c-ink3: #8a97ad;
+  --c-border: #e4e9f2; --c-border2: #d7deea;
+  --c-blue: #2563eb; --c-blued: #1d4ed8; --c-cyan: #38bdf8;
+  --c-soft: #eaf1ff; --c-softfg: #1d4ed8; --c-glow: rgba(37, 99, 235, 0.12);
+  --c-ok: #1f9d6b; --c-okfg: #0f5a3e; --c-oksoft: #e3f6ee;
+  --c-warn: #e08a00; --c-warnsoft: #fcf1dc; --c-warnfg: #7a4a00;
+  --c-err: #dc2626; --c-errsoft: #fdecec; --c-errfg: #b91c1c;
+  --c-side: #ffffff; --c-active: #eaf1ff;
+  --c-side-ink: #0f1b33; --c-side-ink2: #51607a; --c-side-ink3: #8a97ad;
+  --c-side-active-bg: #eaf1ff; --c-side-active-ink: #1d4ed8; --c-side-border: #e4e9f2;
+  --c-nav: rgba(255, 255, 255, 0.82); --c-cardsh: 0 16px 40px rgba(15, 27, 51, 0.12);
+  --c-shadow: 0 24px 60px rgba(15, 27, 51, 0.16); --c-input: #fff;
+}
+.ia-card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 20px; box-shadow: var(--c-shadow); }
+.ia-label { display: block; color: var(--c-ink2); font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+.ia-input { box-sizing: border-box; width: 100%; background: var(--c-input); border: 1.5px solid var(--c-border2); border-radius: 10px; padding: 12px 13px; color: var(--c-ink); font-family: inherit; font-size: 15px; outline: none; transition: border-color 0.15s ease; }
+.ia-input:focus { border-color: var(--c-blue); }
+.ia-input::placeholder { color: var(--c-ink3); }
+.ia-input.err { border-color: var(--c-warn); }
+.iacmd select.ia-input { appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237A89A6' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 34px; }
+.iacmd option { background: var(--c-surface); color: var(--c-ink); }
+.ia-mono { font-family: 'JetBrains Mono', monospace; font-size: 14px; }
+.ia-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: var(--c-blued); color: #fff; font-weight: 600; font-size: 15px; font-family: inherit; padding: 14px; border: none; border-radius: 11px; cursor: pointer; box-shadow: 0 8px 20px rgba(37, 99, 235, 0.32); transition: filter 0.15s ease; }
+.ia-btn:hover { filter: brightness(1.08); }
+.ia-btn:disabled { opacity: 0.6; cursor: default; }
+.ia-btn-outline { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: transparent; border: 1px solid var(--c-border2); color: var(--c-ink); font-weight: 600; font-size: 14px; font-family: inherit; padding: 12px 20px; border-radius: 10px; cursor: pointer; }
+.ia-btn-outline:hover { background: var(--c-input); }
+.ia-link { color: var(--c-softfg); font-weight: 600; cursor: pointer; }
+@keyframes ia-slide { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes ia-ping { 0% { transform: scale(1); opacity: 0.6; } 80%, 100% { transform: scale(2.2); opacity: 0; } }
+@keyframes ia-spin { to { transform: rotate(360deg); } }
+@keyframes ia-toast { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+@media (max-width: 860px) {
+  .iacmd [data-split] { grid-template-columns: 1fr !important; }
+  .iacmd [data-mfa] { grid-template-columns: 1fr !important; }
+  .iacmd [data-clinic] { grid-template-columns: 1fr !important; }
+}
+/* Landing — responsivo */
+@media (max-width: 900px) {
+  .iacmd .lp-nav { display: none !important; }
+  .iacmd .lp-hero { grid-template-columns: 1fr !important; }
+  .iacmd .lp-mesh { display: none !important; }
+  .iacmd .lp-3 { grid-template-columns: 1fr !important; }
+  .iacmd .lp-bento { grid-template-columns: 1fr !important; }
+  .iacmd .lp-bento > div { grid-column: auto !important; }
+  .iacmd .lp-h1 { font-size: 40px !important; }
+}
+@media (max-width: 560px) {
+  .iacmd .lp-hide-sm { display: none !important; }
+}
+

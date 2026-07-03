@@ -1,0 +1,29 @@
+# Segredos
+.env
+.env.*
+!.env.example
+
+# Dependências
+node_modules/
+**/node_modules/
+
+# Build
+dist/
+build/
+*.tsbuildinfo
+
+# Logs
+*.log
+logs/
+
+# Contexto legado (repos antigos clonados só p/ referência)
+.contexto-antigo/
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Redis local
+redis/dump.rdb
+redis/*.pdb
+
