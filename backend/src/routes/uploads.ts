@@ -397,7 +397,9 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     const isOwner = (up as any).clinic_accounts?.tenant_id === req.tenant!.id || (up as any).empresas?.tenant_id === req.tenant!.id;
     if (!isOwner) return reply.code(404).send({ error: 'envio não encontrado.' });
 
-    await supabaseAdmin.from('uploads').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+    // Excluir também PARA a automação: deleted_at já é tratado como 'parado'
+    // pelo motor; marcamos o status junto para o estado ficar explícito.
+    await (supabaseAdmin as any).from('uploads').update({ deleted_at: new Date().toISOString(), status: 'parado', sessao_iniciada_em: null }).eq('id', id);
     return reply.code(204).send();
   });
 
