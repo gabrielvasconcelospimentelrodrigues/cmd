@@ -43,7 +43,7 @@ export default function Painel() {
   const [page, setPageInternal] = useState<Page>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('cmd_active_page') as Page;
-      if (saved && ['painel', 'enviar', 'pendencias', 'config'].includes(saved)) {
+      if (saved && ['painel', 'enviar', 'pendencias', 'config', 'planos'].includes(saved)) {
         return saved;
       }
     }
