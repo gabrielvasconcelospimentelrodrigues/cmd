@@ -16,6 +16,7 @@ export const ALIASES_COLUNA: Record<string, readonly string[]> = {
   data_atendimento: [
     'data atendimento', 'data de atendimento', 'data do atendimento',
     'data do agendamento', 'data agendamento', 'data de agendamento',
+    'agendamento', 'agendamentos', 'data agendada', 'data do procedimento',
     'agendado em',
     'data e horario do atendimento', 'data hora atendimento',
     'atendimento', 'data consulta', 'data da consulta',

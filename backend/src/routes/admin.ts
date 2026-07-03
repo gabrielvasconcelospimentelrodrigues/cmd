@@ -5,6 +5,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { montarPlano } from './empresas';
 import { registrarLog, ator, atorNome } from '../lib/audit';
 import { getPrecos, precoTerminalNaPosicao, type Precos } from '../lib/precos';
+import { getMotorConfig, type MotorConfig } from '../lib/motor-config';
 import type { Database } from '../types/database';
 
 const brl = (v: number | string) =>
@@ -740,27 +741,32 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // Reflete os valores REAIS que o motor usa: env dos workers (concorrência,
   // modo simulado) + constantes do engine (timeouts, retry, locks).
   app.get('/admin/regras', { preHandler: app.authenticateSuperAdmin }, async () => {
-    const env = (k: string): string | undefined => process.env[k] ?? lerWorkersEnv(k);
-    const concListas = Number(env('REGISTRATION_CONCURRENCY') ?? 4);
-    const concExtracao = Number(env('EXTRACTION_CONCURRENCY') ?? 2);
-    const simulada = (env('AUTOMACAO_SIMULADA') ?? 'true') === 'true';
+    const config = await getMotorConfig();
+
+    const fmtMinSec = (s: number) => {
+      if (s < 60) return `${s} segundos`;
+      const m = Math.floor(s / 60);
+      const rest = s % 60;
+      return rest > 0 ? `${m} min ${rest} s` : `${m} min`;
+    };
 
     return {
-      modo: { simulada },
+      modo: { simulada: config.automacao_simulada },
+      config,
       grupos: [
         { titulo: 'Execução & paralelismo', icone: 'cpu', regras: [
-          { label: 'Listas simultâneas', valor: String(concListas), tone: 'accent', desc: 'Quantas listas o motor processa ao mesmo tempo (cada uma num terminal).', origem: 'env REGISTRATION_CONCURRENCY' },
-          { label: 'Extrações simultâneas', valor: String(concExtracao), desc: 'Quantos arquivos são lidos/extraídos em paralelo.', origem: 'env EXTRACTION_CONCURRENCY' },
+          { label: 'Listas simultâneas', valor: String(config.registration_concurrency), tone: 'accent', desc: 'Quantas listas o motor processa ao mesmo tempo (cada uma num terminal).', origem: 'configuracoes.motor' },
+          { label: 'Extrações simultâneas', valor: String(config.extraction_concurrency), desc: 'Quantos arquivos são lidos/extraídos em paralelo.', origem: 'configuracoes.motor' },
           { label: 'Sessões por login CMD', valor: 'Múltiplas', desc: 'O CMD aceita vários acessos com o mesmo usuário — a trava é por lista, não por conta, permitindo rodar várias em paralelo.', origem: 'engine' },
         ] },
         { titulo: 'Tentativas & meta de 100%', icone: 'target', regras: [
           { label: 'Tentativas por paciente', valor: '3', desc: '1ª normal · 2ª recupera a página e repete · 3ª faz novo login e tenta de novo.', origem: 'engine' },
-          { label: 'Rodadas extras refazendo erros', valor: '3', tone: 'accent', desc: 'Ao concluir a lista, reprocessa os que deram erro (novo login, só os que faltam) até 3 rodadas para chegar a 100%.', origem: 'engine MAX_RONDAS_RETRY' },
+          { label: 'Rodadas extras refazendo erros', valor: String(config.max_rondas_retry), tone: 'accent', desc: 'Ao concluir a lista, reprocessa os que deram erro (novo login, só os que faltam) até 3 rodadas para chegar a 100%.', origem: 'configuracoes.motor' },
           { label: 'Deduplicação', valor: 'Ativa', tone: 'ok', desc: 'Não recadastra o mesmo CNS + data de atendimento — evita duplicidade no sistema do governo.', origem: 'engine' },
         ] },
         { titulo: 'Tempos limite', icone: 'clock', regras: [
-          { label: 'Timeout de login', valor: '2 min 30 s', desc: 'Se o login no CMD passar disso, aborta e tenta recuperar.', origem: 'engine' },
-          { label: 'Timeout por cadastro', valor: '6 min', desc: 'Tempo máximo por paciente antes de marcar erro e seguir.', origem: 'engine' },
+          { label: 'Timeout de login', valor: fmtMinSec(config.login_timeout_segundos), desc: 'Se o login no CMD passar disso, aborta e tenta recuperar.', origem: 'configuracoes.motor' },
+          { label: 'Timeout por cadastro', valor: fmtMinSec(config.cadastro_timeout_segundos), desc: 'Tempo máximo por paciente antes de marcar erro e seguir.', origem: 'configuracoes.motor' },
         ] },
         { titulo: 'Dados do cadastro', icone: 'file', regras: [
           { label: 'CID padrão (fallback)', valor: 'Por terminal', desc: 'Quando a ficha não traz o CID-10, usa o CID padrão configurado no terminal (ex.: H53).', origem: 'terminal.cid_padrao' },
@@ -768,17 +774,44 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         ] },
         { titulo: 'Resiliência & recuperação', icone: 'shield', regras: [
           { label: 'Trava por lista (crash-safe)', valor: 'TTL 90 s · renova 30 s', desc: 'Se o processo cair, a trava expira sozinha em segundos e outra instância assume — sem travar a lista.', origem: 'engine lock' },
-          { label: 'Watchdog', valor: 'a cada 5 min', desc: 'Verifica listas presas/órfãs e as recupera automaticamente.', origem: 'engine' },
+          { label: 'Watchdog', valor: `a cada ${config.watchdog_interval_minutos} min`, desc: 'Verifica listas presas/órfãs e as recupera automaticamente.', origem: 'configuracoes.motor' },
         ] },
         { titulo: 'Cobrança & acesso', icone: 'lock', regras: [
           { label: 'Bloqueio por inadimplência', valor: 'Ativo', tone: 'ok', desc: 'Fatura vencida em aberto bloqueia o início da automação até a regularização (gate de pagamento).', origem: 'api' },
           { label: 'Terminal ocupado', valor: 'Oculto', desc: 'Terminal em uso não aparece disponível para outra lista.', origem: 'api' },
         ] },
         { titulo: 'Modo de execução', icone: 'power', regras: [
-          { label: 'Automação', valor: simulada ? 'SIMULADA (teste)' : 'REAL (produção)', tone: simulada ? 'warn' : 'ok', desc: simulada ? 'O motor está em modo de teste — não envia cadastros de verdade ao governo.' : 'O motor está em produção — cadastros são enviados de verdade ao CMD-COLETA.', origem: 'env AUTOMACAO_SIMULADA' },
+          { label: 'Automação', valor: config.automacao_simulada ? 'SIMULADA (teste)' : 'REAL (produção)', tone: config.automacao_simulada ? 'warn' : 'ok', desc: config.automacao_simulada ? 'O motor está em modo de teste — não envia cadastros de verdade ao governo.' : 'O motor está em produção — cadastros são enviados de verdade ao CMD-COLETA.', origem: 'configuracoes.motor' },
         ] },
       ],
     };
+  });
+
+  app.put('/admin/regras', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
+    const b = (req.body ?? {}) as Partial<MotorConfig>;
+
+    const atual = await getMotorConfig();
+
+    const nova: MotorConfig = {
+      registration_concurrency: Math.max(1, Number(b.registration_concurrency ?? atual.registration_concurrency)),
+      extraction_concurrency: Math.max(1, Number(b.extraction_concurrency ?? atual.extraction_concurrency)),
+      max_rondas_retry: Math.max(0, Number(b.max_rondas_retry ?? atual.max_rondas_retry)),
+      login_timeout_segundos: Math.max(10, Number(b.login_timeout_segundos ?? atual.login_timeout_segundos)),
+      cadastro_timeout_segundos: Math.max(10, Number(b.cadastro_timeout_segundos ?? atual.cadastro_timeout_segundos)),
+      watchdog_interval_minutos: Math.max(1, Number(b.watchdog_interval_minutos ?? atual.watchdog_interval_minutos)),
+      automacao_simulada: b.automacao_simulada !== undefined ? (b.automacao_simulada === true || String(b.automacao_simulada) === 'true') : atual.automacao_simulada,
+    };
+
+    await (supabaseAdmin as any).from('configuracoes')
+      .upsert({ chave: 'motor', valor: nova, updated_at: new Date().toISOString() }, { onConflict: 'chave' });
+
+    await registrarLog({
+      tenantId: 0, categoria: 'sistema', acao: 'motor.atualizado', nivel: 'alerta', ator: ator(req),
+      descricao: `${atorNome(req)} atualizou as configurações operacionais do motor de automação.`,
+      meta: nova as any,
+    });
+
+    return nova;
   });
 
   // ---- Solicitações de novos terminais (Super Admin) ----------------------

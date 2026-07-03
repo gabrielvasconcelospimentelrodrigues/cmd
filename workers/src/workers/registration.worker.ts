@@ -3,12 +3,13 @@ import { bullConnection } from '../lib/redis';
 import { QUEUE, type UploadJob, registrationQueue, verificationQueue } from '../queues';
 import { env } from '../config/env';
 import {
-  logEntry, setUploadStatus, getUploadComConta, listarPendentes, marcarPaciente, atualizarContadores, statusDoUpload, registrarExecucao, contarStatus, acrescentarTempoAtivo, jaCadastrado, reenfileirarErros,
+  logEntry, setUploadStatus, getUploadComConta, listarPendentes, marcarPaciente, atualizarContadores, statusDoUpload, registrarExecucao, contarStatus, acrescentarTempoAtivo, jaCadastrado, marcarDuplicados, reenfileirarErros,
 } from '../lib/repo';
 import { proximaJanelaPermitida } from '../scheduling';
 import { withLock } from '../lib/lock';
 import { decrypt } from '../lib/crypto';
 import { WebAutomator, ProfessionalNotFoundError, type PatientData } from '../automation/web-automation';
+import { getMotorConfig, MOTOR_CONFIG_PADRAO } from '../lib/motor-config';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -75,9 +76,13 @@ export function startRegistrationWorker(): Worker<UploadJob> {
         return;
       }
 
-      // Lock POR LISTA (não por conta): CMD aceita várias sessões do mesmo
-      // login, então listas rodam em paralelo. Só evita processar a mesma 2x.
       const resultado = await withLock(`upload:${uploadId}`, async () => {
+        const config = await getMotorConfig().catch(() => MOTOR_CONFIG_PADRAO);
+        const loginTimeoutMs = config.login_timeout_segundos * 1000;
+        const cadastroTimeoutMs = config.cadastro_timeout_segundos * 1000;
+        const maxRondasRetry = config.max_rondas_retry;
+        const automacaoSimulada = config.automacao_simulada;
+
         // Mede o tempo ATIVO desta sessão (exclui ociosidade entre sessões).
         const sessaoInicioMs = Date.now();
         // RETOMADA: preserva o início do registro (não reseta o tempo do
@@ -85,6 +90,10 @@ export function startRegistrationWorker(): Worker<UploadJob> {
         const inicio = upload.registro_iniciado_em ?? new Date().toISOString();
         await setUploadStatus(uploadId, 'registering', { job_id: job.id ?? '', registro_iniciado_em: inicio, registro_concluido_em: null, sessao_iniciada_em: new Date().toISOString() });
         try {
+        // ANTES de cadastrar: confere duplicados e manda-os para Pendências.
+        // (Vale também quando a extração dispara o registro automaticamente.)
+        const dups = await marcarDuplicados(uploadId, conta.tenant_id);
+        if (dups > 0) await logEntry(uploadId, 'WARN', `${dups} duplicado(s) encontrado(s) e enviado(s) para Pendências — não serão cadastrados.`);
         const pendentes = await listarPendentes(uploadId);
         if (pendentes.length === 0) {
           await setUploadStatus(uploadId, 'done', { current_step: '', registro_concluido_em: new Date().toISOString() });
@@ -102,7 +111,7 @@ export function startRegistrationWorker(): Worker<UploadJob> {
           await logEntry(uploadId, 'INFO', `Retomando de onde parou: ${registered} cadastrado(s), ${errored} com erro. Faltam ${pendentes.length}.`);
         }
 
-        if (env.AUTOMACAO_SIMULADA) {
+        if (automacaoSimulada) {
           await logEntry(uploadId, 'INFO', `[SIMULAÇÃO] Iniciando cadastro de ${pendentes.length} paciente(s) (demonstração — cadastro real depende do motor + conta gov.br ativa).`);
           for (const p of pendentes) {
             if (await pausouOuParou(uploadId)) { await logEntry(uploadId, 'WARN', 'Interrompido pelo usuário.'); return 'parado'; }
@@ -134,7 +143,7 @@ export function startRegistrationWorker(): Worker<UploadJob> {
           try {
             await automator.start();
             try {
-              await comTimeout(automator.login(), LOGIN_TIMEOUT_MS, 'login');
+              await comTimeout(automator.login(), loginTimeoutMs, 'login');
             } catch (e) {
               await logEntry(uploadId, 'WARN', `⚠ Automação ${(e as Error).message} no login. Pausando e retomando em 30s de onde parou (${registered} já cadastrado(s)).`);
               precisaRetomar = true;
@@ -164,7 +173,7 @@ export function startRegistrationWorker(): Worker<UploadJob> {
               }
               let r: { ok: boolean; erro?: string };
               try {
-                r = await comTimeout(cadastrarComRetry(automator, pd, uploadId), CADASTRO_TIMEOUT_MS, 'cadastro');
+                r = await comTimeout(cadastrarComRetry(automator, pd, uploadId), cadastroTimeoutMs, 'cadastro');
               } catch (e) {
                 // Esse paciente TRAVOU. Recupera a sessão p/ os próximos e o
                 // manda para Pendências (não congela o lote inteiro).
@@ -202,17 +211,17 @@ export function startRegistrationWorker(): Worker<UploadJob> {
         }
 
         // RETRY até 100%: ao terminar, se sobraram erros, refaz numa rodada
-        // extra (novo login + só os que erraram). Limitado a MAX_RONDAS_RETRY
+        // extra (novo login + só os que erraram). Limitado a maxRondasRetry
         // para não repetir eternamente erros de dado (CID/nascimento ausente).
         const cont = await contarStatus(uploadId);
         await atualizarContadores(uploadId, cont.registered, cont.errored);
-        if (cont.errored > 0 && (upload.retry_rounds ?? 0) < MAX_RONDAS_RETRY && !(await pausouOuParou(uploadId))) {
+        if (cont.errored > 0 && (upload.retry_rounds ?? 0) < maxRondasRetry && !(await pausouOuParou(uploadId))) {
           const reset = await reenfileirarErros(uploadId);
           if (reset > 0) {
             const ronda = (upload.retry_rounds ?? 0) + 1;
             await setUploadStatus(uploadId, 'registering', { current_step: `Refazendo ${reset} ficha(s) com erro para chegar a 100%…`, retry_rounds: ronda });
             await registrationQueue.add('registrar', { uploadId }, { delay: 3000 });
-            await logEntry(uploadId, 'INFO', `Rodada extra ${ronda}/${MAX_RONDAS_RETRY}: refazendo ${reset} que deram erro.`);
+            await logEntry(uploadId, 'INFO', `Rodada extra ${ronda}/${maxRondasRetry}: refazendo ${reset} que deram erro.`);
             return 'refazendo';
           }
         }

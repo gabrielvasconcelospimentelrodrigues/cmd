@@ -20,6 +20,8 @@ export async function extrairPacientes(
   if (temMapa) {
     const linhas = await importarComMapa(buffer, filename, mapeamento as Partial<Record<CampoImportacao, string>>);
     return linhas.map((l) => {
+      // Obrigatórios: cns (aceita CPF ou CNS) + data_atendimento + médico.
+      // Nome/CID são preenchidos pelo CMD a partir do CNS, então não bloqueiam.
       const fundamentais = { cns: l.cns, data_atendimento: l.data_atendimento, medico_nome: l.profissional };
       const extraction_method: Record<string, string> = {};
       const campos_incertos: string[] = [];

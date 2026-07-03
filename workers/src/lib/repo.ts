@@ -123,6 +123,51 @@ export async function jaCadastrado(clinicAccountId: number, cns: string, dataAte
   return (count ?? 0) > 0;
 }
 
+/** Verifica os duplicados da lista ANTES de cadastrar: um pendente é duplicado
+ * se o mesmo CNS + data já está cadastrado (em outra ficha do assinante) OU se
+ * repete dentro da própria lista. Os duplicados vão para PENDÊNCIAS
+ * (needs_review) para tratamento manual. Retorna quantos foram marcados. */
+export async function marcarDuplicados(uploadId: number, tenantId: number): Promise<number> {
+  const { data: pend } = await supabaseAdmin
+    .from('patient_records')
+    .select('id, cns, data_atendimento')
+    .eq('upload_id', uploadId)
+    .eq('status', 'pending_registration')
+    .order('id', { ascending: true });
+  const pendentes = (pend ?? []) as { id: number; cns: string | null; data_atendimento: string | null }[];
+  if (pendentes.length === 0) return 0;
+
+  const { data: cas } = await supabaseAdmin.from('clinic_accounts').select('id').eq('tenant_id', tenantId);
+  const caIds = (cas ?? []).map((c) => c.id);
+  const jaCad = new Set<string>();
+  if (caIds.length > 0) {
+    const { data: reg } = await supabaseAdmin
+      .from('patient_records')
+      .select('cns, data_atendimento')
+      .in('clinic_account_id', caIds)
+      .in('status', ['registered', 'verified_ok', 'verified_divergent', 'done_manually']);
+    for (const r of (reg ?? []) as { cns: string | null; data_atendimento: string | null }[]) {
+      if (r.cns && r.data_atendimento) jaCad.add(`${r.cns}|${r.data_atendimento}`);
+    }
+  }
+
+  const vistos = new Set<string>();
+  const dupIds: number[] = [];
+  for (const p of pendentes) {
+    if (!p.cns || !p.data_atendimento) continue;
+    const chave = `${p.cns}|${p.data_atendimento}`;
+    if (jaCad.has(chave) || vistos.has(chave)) dupIds.push(p.id);
+    else vistos.add(chave);
+  }
+  if (dupIds.length > 0) {
+    await supabaseAdmin
+      .from('patient_records')
+      .update({ status: 'needs_review', error_message: 'Cadastro duplicado — mesmo CNS já cadastrado nesta data de atendimento.' })
+      .in('id', dupIds);
+  }
+  return dupIds.length;
+}
+
 /** Atualiza o status de um paciente (e marca registered_at quando cadastrado). */
 export async function marcarPaciente(id: number, status: string, errorMessage = ''): Promise<void> {
   await supabaseAdmin

@@ -20,9 +20,11 @@ export interface PatientData {
 }
 
 /**
- * Campos fundamentais para o cadastro no CMD-COLETA. `nome` e
- * `data_nascimento` ficam DE FORA de propósito: o CMD-COLETA os busca no
- * CADSUS a partir do CNS, então uma planilha sem essas colunas não bloqueia.
+ * Campos OBRIGATÓRIOS para o cadastro no CMD-COLETA: `cns` (aceita CPF ou CNS —
+ * o aliases.ts mapeia ambos para este campo), `data_atendimento` (data de
+ * admissão) e `medico_nome` (médico). `nome`, `data_nascimento` e `cid` ficam
+ * DE FORA: o CMD-COLETA os busca a partir do CNS. Faltando qualquer um dos três
+ * obrigatórios, a ficha cai em Pendências.
  */
 export const CAMPOS_FUNDAMENTAIS = ['cns', 'data_atendimento', 'medico_nome'] as const;
 export type CampoFundamental = (typeof CAMPOS_FUNDAMENTAIS)[number];

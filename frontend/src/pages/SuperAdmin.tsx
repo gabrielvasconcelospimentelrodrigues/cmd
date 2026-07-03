@@ -156,7 +156,7 @@ export default function SuperAdmin() {
           {page === 'planos' && <Planos tenants={tenants} showToast={showToast} />}
           {page === 'infra' && <Infra />}
           {page === 'logs' && <Logs users={users} tenants={tenants} />}
-          {page === 'regras' && <Regras />}
+          {page === 'regras' && <Regras showToast={showToast} />}
         </div>
       </main>
 
@@ -1627,23 +1627,86 @@ function Logs({ users, tenants }: { users: U[]; tenants: T[] }) {
 
 interface RegraItem { label: string; valor: string; desc: string; origem: string; tone?: 'ok' | 'warn' | 'accent' }
 interface RegraGrupo { titulo: string; icone: string; regras: RegraItem[] }
-interface RegrasResp { modo: { simulada: boolean }; grupos: RegraGrupo[] }
+interface RegrasResp {
+  modo: { simulada: boolean };
+  config?: {
+    registration_concurrency: number;
+    extraction_concurrency: number;
+    max_rondas_retry: number;
+    login_timeout_segundos: number;
+    cadastro_timeout_segundos: number;
+    watchdog_interval_minutos: number;
+    automacao_simulada: boolean;
+  };
+  grupos: RegraGrupo[];
+}
 
 const ICONE_GRUPO: Record<string, ReactNode> = {
   cpu: <Cpu size={16} />, target: <ShieldCheck size={16} />, clock: <Loader2 size={16} />,
   file: <ScrollText size={16} />, shield: <Shield size={16} />, lock: <CreditCard size={16} />, power: <Wallet size={16} />,
 };
 
-function Regras() {
+function Regras({ showToast }: { showToast: (t: ToastData) => void }) {
   const [d, setD] = useState<RegrasResp | null>(null);
   const [loading, setLoading] = useState(true);
+  const [editando, setEditando] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+
+  // Form states
+  const [regConcurrency, setRegConcurrency] = useState(4);
+  const [extConcurrency, setExtConcurrency] = useState(2);
+  const [maxRetry, setMaxRetry] = useState(3);
+  const [loginTimeout, setLoginTimeout] = useState(150);
+  const [cadastroTimeout, setCadastroTimeout] = useState(360);
+  const [watchdogInterval, setWatchdogInterval] = useState(5);
+  const [simulada, setSimulada] = useState(true);
+
+  const carregar = async () => {
+    try {
+      setLoading(true);
+      const res = await apiGet<RegrasResp>('/admin/regras');
+      setD(res);
+      if (res.config) {
+        setRegConcurrency(res.config.registration_concurrency);
+        setExtConcurrency(res.config.extraction_concurrency);
+        setMaxRetry(res.config.max_rondas_retry);
+        setLoginTimeout(res.config.login_timeout_segundos);
+        setCadastroTimeout(res.config.cadastro_timeout_segundos);
+        setWatchdogInterval(res.config.watchdog_interval_minutos);
+        setSimulada(res.config.automacao_simulada);
+      }
+    } catch {
+      setD(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    (async () => {
-      try { setD(await apiGet<RegrasResp>('/admin/regras')); }
-      catch { setD(null); } finally { setLoading(false); }
-    })();
+    void carregar();
   }, []);
+
+  const salvar = async () => {
+    setSalvando(true);
+    try {
+      await apiPut('/admin/regras', {
+        registration_concurrency: regConcurrency,
+        extraction_concurrency: extConcurrency,
+        max_rondas_retry: maxRetry,
+        login_timeout_segundos: loginTimeout,
+        cadastro_timeout_segundos: cadastroTimeout,
+        watchdog_interval_minutos: watchdogInterval,
+        automacao_simulada: simulada,
+      });
+      showToast({ title: 'Configurações salvas', msg: 'As regras do motor foram atualizadas com sucesso.', kind: 'ok' });
+      setEditando(false);
+      await carregar();
+    } catch (e) {
+      showToast({ title: 'Erro ao salvar', msg: (e as Error).message, kind: 'err' });
+    } finally {
+      setSalvando(false);
+    }
+  };
 
   if (loading) return <Card style={{ padding: 30, color: 'var(--c-ink3)', fontSize: 14 }}>Carregando regras…</Card>;
   if (!d) return <Card style={{ padding: 30, color: 'var(--c-ink3)', fontSize: 14 }}>Não foi possível carregar as regras.</Card>;
@@ -1658,34 +1721,92 @@ function Regras() {
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: d.modo.simulada ? 'var(--c-warn)' : 'var(--c-ok)' }} />
           Motor {d.modo.simulada ? 'em modo SIMULADO' : 'em modo REAL'}
         </span>
+        {!editando && (
+          <button onClick={() => setEditando(true)} className="ia-btn" style={{ padding: '8px 16px', fontSize: 13 }}>
+            <Pencil size={14} /> Editar configurações
+          </button>
+        )}
       </div>
 
-      <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 14 }}>
-        {d.grupos.map((g) => (
-          <Card key={g.titulo} style={{ overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '13px 18px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)' }}>
-              <span style={{ color: 'var(--c-softfg)', display: 'grid', placeItems: 'center' }}>{ICONE_GRUPO[g.icone] ?? <SlidersHorizontal size={16} />}</span>
-              <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 700 }}>{g.titulo}</span>
+      {editando ? (
+        <Card style={{ padding: 22 }}>
+          <h3 style={{ color: 'var(--c-ink)', fontSize: 16, fontWeight: 700, margin: '0 0 16px' }}>Editar Regras do Motor</h3>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 20 }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--c-ink2)', marginBottom: 6 }}>Listas Simultâneas</label>
+              <input type="number" className="ia-input" min={1} value={regConcurrency} onChange={(e) => setRegConcurrency(Math.max(1, Number(e.target.value)))} />
             </div>
-            {g.regras.map((r, i) => {
-              const cor = r.tone === 'ok' ? 'var(--c-okfg)' : r.tone === 'warn' ? 'var(--c-warnfg)' : r.tone === 'accent' ? 'var(--c-softfg)' : 'var(--c-ink)';
-              return (
-                <div key={i} style={{ padding: '13px 18px', borderTop: i ? '1px solid var(--c-border)' : 'none' }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
-                    <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 600 }}>{r.label}</span>
-                    <span style={{ color: cor, fontSize: 13.5, fontWeight: 700, textAlign: 'right', flex: 'none' }}>{r.valor}</span>
+
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--c-ink2)', marginBottom: 6 }}>Extrações Simultâneas</label>
+              <input type="number" className="ia-input" min={1} value={extConcurrency} onChange={(e) => setExtConcurrency(Math.max(1, Number(e.target.value)))} />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--c-ink2)', marginBottom: 6 }}>Rodadas Extras (Retry)</label>
+              <input type="number" className="ia-input" min={0} value={maxRetry} onChange={(e) => setMaxRetry(Math.max(0, Number(e.target.value)))} />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--c-ink2)', marginBottom: 6 }}>Timeout de Login (segundos)</label>
+              <input type="number" className="ia-input" min={10} value={loginTimeout} onChange={(e) => setLoginTimeout(Math.max(10, Number(e.target.value)))} />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--c-ink2)', marginBottom: 6 }}>Timeout por Cadastro (segundos)</label>
+              <input type="number" className="ia-input" min={10} value={cadastroTimeout} onChange={(e) => setCadastroTimeout(Math.max(10, Number(e.target.value)))} />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--c-ink2)', marginBottom: 6 }}>Watchdog Intervalo (minutos)</label>
+              <input type="number" className="ia-input" min={1} value={watchdogInterval} onChange={(e) => setWatchdogInterval(Math.max(1, Number(e.target.value)))} />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--c-ink2)', marginBottom: 6 }}>Modo Simulação</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Switch on={simulada} onClick={() => setSimulada(!simulada)} />
+                <span style={{ fontSize: 13, color: 'var(--c-ink2)' }}>{simulada ? 'Simulada' : 'Real (Produção)'}</span>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', borderTop: '1px solid var(--c-border)', paddingTop: 16 }}>
+            <button onClick={() => setEditando(false)} className="ia-btn-outline" style={{ padding: '9px 16px' }}>Cancelar</button>
+            <button onClick={salvar} disabled={salvando} className="ia-btn" style={{ padding: '9px 20px' }}>
+              {salvando ? 'Salvando…' : 'Salvar Regras'}
+            </button>
+          </div>
+        </Card>
+      ) : (
+        <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 14 }}>
+          {d.grupos.map((g) => (
+            <Card key={g.titulo} style={{ overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '13px 18px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)' }}>
+                <span style={{ color: 'var(--c-softfg)', display: 'grid', placeItems: 'center' }}>{ICONE_GRUPO[g.icone] ?? <SlidersHorizontal size={16} />}</span>
+                <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 700 }}>{g.titulo}</span>
+              </div>
+              {g.regras.map((r, i) => {
+                const cor = r.tone === 'ok' ? 'var(--c-okfg)' : r.tone === 'warn' ? 'var(--c-warnfg)' : r.tone === 'accent' ? 'var(--c-softfg)' : 'var(--c-ink)';
+                return (
+                  <div key={i} style={{ padding: '13px 18px', borderTop: i ? '1px solid var(--c-border)' : 'none' }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+                      <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 600 }}>{r.label}</span>
+                      <span style={{ color: cor, fontSize: 13.5, fontWeight: 700, textAlign: 'right', flex: 'none' }}>{r.valor}</span>
+                    </div>
+                    <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 3, lineHeight: 1.5 }}>{r.desc}</div>
+                    <div style={{ color: 'var(--c-ink3)', fontSize: 10.5, marginTop: 4, opacity: 0.7 }} className="ia-mono">{r.origem}</div>
                   </div>
-                  <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 3, lineHeight: 1.5 }}>{r.desc}</div>
-                  <div style={{ color: 'var(--c-ink3)', fontSize: 10.5, marginTop: 4, opacity: 0.7 }} className="ia-mono">{r.origem}</div>
-                </div>
-              );
-            })}
-          </Card>
-        ))}
-      </div>
+                );
+              })}
+            </Card>
+          ))}
+        </div>
+      )}
 
       <p style={{ color: 'var(--c-ink3)', fontSize: 12, margin: 0 }}>
-        Estas regras são definidas no motor (constantes do engine e variáveis de ambiente dos workers). Alterá-las exige mudança na configuração do motor — posso deixar as principais editáveis por aqui se você quiser.
+        Estas regras são definidas no motor e salvas na tabela de configurações. Alterações entram em vigor no próximo ciclo de execução.
       </p>
     </div>
   );
