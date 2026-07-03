@@ -44,7 +44,11 @@ export default function SuperAdmin() {
   const { session, signOut } = useAuth();
   const [theme, toggle] = useTheme();
   const [toast, showToast] = useToast();
-  const [page, setPage] = useState<Page>('overview');
+  const [page, setPage] = useState<Page>(() => {
+    const saved = localStorage.getItem('iacmd:superadmin:tab');
+    const valid: Page[] = ['overview', 'auth', 'empresas', 'usuarios', 'financeiro', 'planos', 'infra', 'logs', 'regras'];
+    return (saved && valid.includes(saved as Page)) ? (saved as Page) : 'overview';
+  });
   const [tenants, setTenants] = useState<T[]>([]);
   const [users, setUsers] = useState<U[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -52,6 +56,10 @@ export default function SuperAdmin() {
   const [confirm, setConfirm] = useState<{ t: T; tipo: 'approve' | 'suspend' } | null>(null);
   const [perfilAberto, setPerfilAberto] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('iacmd:superadmin:tab', page);
+  }, [page]);
 
   const carregar = useCallback(async () => {
     const [t, u, s, tr] = await Promise.all([
