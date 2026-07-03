@@ -54,6 +54,17 @@ async function buildServer() {
   return app;
 }
 
+// Cache do servidor para Vercel Serverless
+let cachedApp: any = null;
+
+export default async function handler(req: any, res: any) {
+  if (!cachedApp) {
+    cachedApp = await buildServer();
+  }
+  await cachedApp.ready();
+  cachedApp.server.emit('request', req, res);
+}
+
 async function main() {
   const app = await buildServer();
 
@@ -76,4 +87,8 @@ async function main() {
   }
 }
 
-void main();
+// Só roda o loop de escuta de porta local se não estiver na Vercel
+if (!process.env.VERCEL) {
+  void main();
+}
+
