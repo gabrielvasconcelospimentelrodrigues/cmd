@@ -11,10 +11,19 @@ export interface ApiError extends Error {
 
 async function authHeader(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
+  let session = data.session;
+  // Se o access token já expirou (ou expira em <60s), renova ANTES de chamar a
+  // API — evita o "token inválido ou expirado" quando o refresh automático não
+  // rodou (PC dormiu, aba inativa por muito tempo).
+  if (session?.expires_at && session.expires_at * 1000 < Date.now() + 60_000) {
+    const r = await supabase.auth.refreshSession();
+    session = r.data.session ?? session;
+  }
+  const token = session?.access_token;
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+let redirecionando = false;
 async function toError(res: Response): Promise<ApiError> {
   let msg = res.statusText;
   let code: string | undefined;
@@ -24,6 +33,15 @@ async function toError(res: Response): Promise<ApiError> {
     code = j.code;
   } catch {
     /* corpo não-JSON */
+  }
+  // 401 = sessão morta (token inválido/expirado e sem refresh possível).
+  // Desloga e manda pro login, em vez de deixar a tela de erro travada.
+  if (res.status === 401 && typeof window !== 'undefined' && !redirecionando) {
+    redirecionando = true;
+    try { await supabase.auth.signOut(); } catch { /* ignore */ }
+    if (!/\/(login|registro|esqueci-senha)/.test(window.location.pathname)) {
+      window.location.href = '/login';
+    }
   }
   const e = new Error(msg) as ApiError;
   e.status = res.status;

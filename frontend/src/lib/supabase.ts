@@ -5,4 +5,11 @@ import { createClient } from '@supabase/supabase-js';
 export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL ?? 'https://zszlhuwdtqahfjlxpjxw.supabase.co',
   import.meta.env.VITE_SUPABASE_ANON_KEY ?? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpzemxodXdkdHFhaGZqbHhwanh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2MTY5NjAsImV4cCI6MjA5ODE5Mjk2MH0.EU1ZS5RldxFdTDLnMD0jJ4_4SDr_zzi_3ympratidXk',
+  {
+    auth: {
+      persistSession: true,      // mantém a sessão entre reloads
+      autoRefreshToken: true,    // renova o token em background automaticamente
+      detectSessionInUrl: true,
+    },
+  },
 );
