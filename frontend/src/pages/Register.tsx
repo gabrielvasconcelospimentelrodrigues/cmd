@@ -130,5 +130,5 @@ export default function Register() {
       </div>
       <Toast data={toast} />
     </div>
-
+  );
 }
