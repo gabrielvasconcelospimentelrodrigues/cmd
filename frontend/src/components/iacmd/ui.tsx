@@ -3,7 +3,7 @@ import { Eye, EyeOff, Sun, Moon, Check, AlertCircle } from 'lucide-react';
 
 /* ---- Tema (dark/light, persistido) ------------------------------------- */
 export function useTheme(): [string, () => void] {
-  const [theme, setTheme] = useState<string>(() => localStorage.getItem('iacmd-theme') || 'dark');
+  const [theme, setTheme] = useState<string>(() => localStorage.getItem('iacmd-theme') || 'light');
   useEffect(() => {
     localStorage.setItem('iacmd-theme', theme);
   }, [theme]);
