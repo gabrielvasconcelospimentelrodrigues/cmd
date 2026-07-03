@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { supabaseAdmin } from '../lib/supabase';
 import { montarPlano } from './empresas';
 import { registrarLog, ator, atorNome } from '../lib/audit';
+import { getPrecos, precoTerminalNaPosicao, type Precos } from '../lib/precos';
 import type { Database } from '../types/database';
 
 const brl = (v: number | string) =>
@@ -165,6 +166,30 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/admin/tenants/:id/approve', { preHandler: app.authenticateSuperAdmin }, setStatus('active'));
   app.post('/admin/tenants/:id/suspend', { preHandler: app.authenticateSuperAdmin }, setStatus('suspended'));
+
+  // ---- TABELA DE PREÇOS global (implantação + valor escalonado/terminal) ----
+  app.get('/admin/precos', { preHandler: app.authenticateSuperAdmin }, async () => {
+    return await getPrecos();
+  });
+
+  app.put('/admin/precos', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
+    const b = (req.body ?? {}) as Partial<Precos>;
+    const terminais = Array.isArray(b.terminais) ? b.terminais.map((n) => Math.max(0, Number(n) || 0)) : [];
+    if (terminais.length === 0) return reply.code(400).send({ error: 'Informe ao menos o preço do 1º terminal.' });
+    const novo: Precos = {
+      implantacao: Math.max(0, Number(b.implantacao) || 0),
+      terminais,
+      adicional: Math.max(0, Number(b.adicional) || 0),
+    };
+    await (supabaseAdmin as any).from('configuracoes')
+      .upsert({ chave: 'precos', valor: novo, updated_at: new Date().toISOString() }, { onConflict: 'chave' });
+    await registrarLog({
+      categoria: 'financeiro', acao: 'precos.atualizados', nivel: 'info', ator: ator(req),
+      descricao: `${atorNome(req)} atualizou a tabela de preços (implantação ${brl(novo.implantacao)}, 1º terminal ${brl(novo.terminais[0] ?? 0)}).`,
+      meta: novo as unknown as Record<string, unknown>,
+    });
+    return novo;
+  });
 
   // Localização do assinante (UF/cidade) — alimenta o mapa do Brasil.
   app.patch('/admin/tenants/:id/local', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
@@ -804,12 +829,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const { data: tenant } = await supabaseAdmin.from('tenants').select('max_terminais, valor_terminal').eq('id', tenantId).maybeSingle();
     await supabaseAdmin
       .from('tenants')
-      .update({ max_terminais: Number((tenant as any)?.max_terminais ?? 1) + 1 } as any)
+      .update({ max_terminais: Number((tenant as any)?.max_terminais ?? 0) + 1 } as any)
       .eq('id', tenantId);
 
-    // COBRANÇA PROPORCIONAL: terminal contratado no meio do mês paga só os dias
-    // que faltam; a mensalidade cheia entra no mês seguinte (gerar-mensalidade).
-    const valorTerminal = Number((tenant as any)?.valor_terminal ?? 2000);
+    // COBRANÇA PROPORCIONAL com PREÇO ESCALONADO: o valor é o do terminal na
+    // sua POSIÇÃO (o total já foi incrementado acima, então este é o último).
+    const precos = await getPrecos();
+    const { data: empsTot } = await supabaseAdmin.from('empresas').select('terminais_contratados').eq('tenant_id', tenantId);
+    const totalContratados = (empsTot ?? []).reduce((s, e) => s + Number((e as { terminais_contratados?: number }).terminais_contratados ?? 0), 0);
+    const valorTerminal = precoTerminalNaPosicao(precos, totalContratados);
     const hoje = new Date();
     const ano = hoje.getFullYear();
     const mes = hoje.getMonth();
@@ -892,7 +920,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const { data: tenant } = await supabaseAdmin.from('tenants').select('max_terminais, valor_terminal').eq('id', emp.tenant_id).maybeSingle();
     const valorTerminal = Number((tenant as any)?.valor_terminal ?? 0);
     await (supabaseAdmin as any).from('tenants')
-      .update({ max_terminais: Math.max(0, Number((tenant as any)?.max_terminais ?? 1) - 1) }).eq('id', emp.tenant_id);
+      .update({ max_terminais: Math.max(0, Number((tenant as any)?.max_terminais ?? 0) - 1) }).eq('id', emp.tenant_id);
     await registrarLog({
       tenantId: emp.tenant_id, categoria: 'terminal', acao: 'terminal.revogado', nivel: 'alerta', ator: ator(req),
       descricao: `${atorNome(req)} revogou 1 terminal de ${emp.nome} (−${brl(valorTerminal)}/mês a partir do próximo ciclo).`,

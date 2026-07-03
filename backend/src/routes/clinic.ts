@@ -48,7 +48,7 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
       .eq('id', req.tenant!.id)
       .maybeSingle();
 
-    const maxTerminais = Number((tenant as any)?.max_terminais ?? 1);
+    const maxTerminais = Number((tenant as any)?.max_terminais ?? 0);
 
     const { count, error: countErr } = await supabaseAdmin
       .from('clinic_accounts')
