@@ -37,7 +37,7 @@ export default function Landing() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <button onClick={toggle} title="Alternar tema" style={{ width: 38, height: 38, borderRadius: 10, border: '1px solid var(--c-border)', background: 'transparent', color: 'var(--c-ink)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}>{theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}</button>
             <button onClick={() => nav('/login')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--c-ink2)', fontSize: 14, fontWeight: 500, fontFamily: 'inherit' }}>Entrar</button>
-            <button onClick={() => nav('/registro')} className="ia-btn" style={{ padding: '10px 18px', fontSize: 14 }}>Começar agora</button>
+            <button onClick={() => nav('/registro')} className="ia-btn" style={{ padding: '10px 18px', fontSize: 14 }}>Começar<span className="lp-hide-sm"> agora</span></button>
           </div>
         </div>
       </header>
