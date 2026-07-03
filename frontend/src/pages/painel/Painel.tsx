@@ -477,7 +477,7 @@ function EnviosRecentes({ empresas = [], uploads, onChange, showToast, simple, o
     } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); }
   };
 
-  const isRunning = (u: Upload) => ['registering', 'extracting'].includes(u.status);
+  const isRunning = (u: Upload) => ['registering', 'extracting', 'extracted'].includes(u.status);
   const temPendentes = (u: Upload) => u.patients_found > 0 && u.patients_registered + u.patients_errored < u.patients_found;
   const cols = simple ? '1fr 150px 140px 120px 140px' : '1fr 150px 90px 100px 70px 130px 140px';
   return (
