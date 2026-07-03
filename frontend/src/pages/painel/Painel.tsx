@@ -149,11 +149,21 @@ export default function Painel() {
           </div>
         </div>
         <div className="ia-main-pad" style={{ maxWidth: page === 'painel' && runningUploads.length > 0 ? '100%' : 1180, margin: '0 auto', padding: 28, animation: 'ia-slide .25s ease' }}>
-          {page === 'painel' && <Home tenant={tenant} uploads={uploads} patients={patients} empresas={empresas} onEnviar={() => setPage('enviar')} onChange={carregar} showToast={showToast} />}
-          {page === 'enviar' && <Enviar empresas={empresas} uploads={uploads} onChange={carregar} showToast={showToast} />}
-          {page === 'pendencias' && <Pendencias patients={patients} onChange={carregar} showToast={showToast} />}
-          {page === 'planos' && <Planos tenant={tenant} onChange={carregar} showToast={showToast} />}
-          {page === 'config' && <Config tenant={tenant} contas={contas} empresas={empresas} onChange={carregar} showToast={showToast} />}
+          <div style={{ display: page === 'painel' ? 'block' : 'none' }}>
+            <Home tenant={tenant} uploads={uploads} patients={patients} empresas={empresas} onEnviar={() => setPage('enviar')} onChange={carregar} showToast={showToast} />
+          </div>
+          <div style={{ display: page === 'enviar' ? 'block' : 'none' }}>
+            <Enviar empresas={empresas} uploads={uploads} onChange={carregar} showToast={showToast} />
+          </div>
+          <div style={{ display: page === 'pendencias' ? 'block' : 'none' }}>
+            <Pendencias patients={patients} onChange={carregar} showToast={showToast} />
+          </div>
+          <div style={{ display: page === 'planos' ? 'block' : 'none' }}>
+            <Planos tenant={tenant} onChange={carregar} showToast={showToast} />
+          </div>
+          <div style={{ display: page === 'config' ? 'block' : 'none' }}>
+            <Config tenant={tenant} contas={contas} empresas={empresas} onChange={carregar} showToast={showToast} />
+          </div>
         </div>
       </main>
       {perfilAberto && <ProfileSecurity onClose={() => setPerfilAberto(false)} showToast={showToast} papelLabel="Assinante" />}

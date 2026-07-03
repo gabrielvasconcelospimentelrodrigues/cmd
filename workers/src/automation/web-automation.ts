@@ -232,14 +232,32 @@ export class WebAutomator {
     this.passo('Login aceito, carregando próxima tela...');
     await page.waitForTimeout(8000);
 
-    // Tela de escolha de perfil do gov.br/SCPA.
-    try {
-      await page.getByText('Usuário', { exact: true }).click({ timeout: 5000 });
+    // Tela de escolha de perfil do gov.br/SCPA: abre o dropdown "Usuário"
+    // (setinha) e escolhe a esfera "Ministério da Saúde". O texto pode ser
+    // "Ministério da Saúde" OU "Esfera Ministério da Saúde" → match parcial.
+    // Tenta algumas vezes: se não achar a esfera, reabre o dropdown.
+    for (let t = 0; t < 4; t++) {
+      const esfera = page.getByText('Ministério da Saúde', { exact: false }).first();
+      // Já dá pra clicar direto na esfera?
+      if (await esfera.isVisible({ timeout: 1500 }).catch(() => false)) {
+        await esfera.click({ timeout: 5000 }).catch(() => {});
+        await page.waitForTimeout(3000);
+        break;
+      }
+      // Senão, abre o seletor de perfil "Usuário" (clica no dropdown/setinha).
+      const temPerfil =
+        (await page.getByText('perfil', { exact: false }).count()) > 0 ||
+        (await page.getByText('Usuário', { exact: true }).count()) > 0;
+      if (!temPerfil) break; // não é a tela de perfil — segue
+      await page.getByText('Usuário', { exact: true }).first().click({ timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(1200);
+      const esfera2 = page.getByText('Ministério da Saúde', { exact: false }).first();
+      if (await esfera2.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await esfera2.click({ timeout: 5000 }).catch(() => {});
+        await page.waitForTimeout(3000);
+        break;
+      }
       await page.waitForTimeout(1500);
-      await page.getByText('Esfera Ministério da Saúde').first().click({ timeout: 5000 });
-      await page.waitForTimeout(3000);
-    } catch {
-      /* já selecionado */
     }
 
     // Portal "Meus Sistemas" → "ACESSAR" abre o CMD-COLETA em nova aba.
@@ -269,10 +287,24 @@ export class WebAutomator {
     }
 
     // Espera o dashboard (botão "Incluir contato assistencial") até 40s.
+    let dashboardOk = false;
     try {
       await this.page!.getByRole('button', { name: 'Incluir contato assistencial' }).first().waitFor({ state: 'visible', timeout: 40_000 });
+      dashboardOk = true;
     } catch {
-      /* segue — pode haver modal */
+      /* segue — pode haver modal ou ainda estar na tela de perfil */
+    }
+    // Se NÃO abriu o CMD e ainda está na tela de acesso/perfil, o login não
+    // concluiu — falha explícita para não tentar cadastrar numa tela errada.
+    if (!dashboardOk) {
+      const p = this.page!;
+      const naTelaPerfil =
+        p.url().includes('acesso.saude.gov.br') ||
+        (await p.getByText('perfil', { exact: false }).count()) > 0 ||
+        (await p.getByText('Ministério da Saúde', { exact: false }).count()) > 0;
+      if (naTelaPerfil) {
+        throw new Error('Não foi possível concluir o login: travou na escolha de perfil (Usuário → Ministério da Saúde).');
+      }
     }
     await this.dispensarModalSair();
     this.passo('Login concluído — CMD-COLETA aberto.');
@@ -539,13 +571,8 @@ export class WebAutomator {
     if (!patient.dataAtendimento) {
       throw new Error(`data_atendimento ausente para ${nome || cns} — verifique se a coluna de data foi mapeada no arquivo importado.`);
     }
-    // CID-10 é obrigatório no gov ("Deve ser informado ao menos um Problema/
-    // Diagnóstico"). Falha rápido ANTES de abrir o formulário — assim o
-    // paciente vai para Pendências com motivo claro, sem travar a tela.
-    const cidObrigatorio = this.valorOverride(overrides, 'problema_diagnostico') || patient.cid10Codigo;
-    if (!cidObrigatorio || !cidObrigatorio.trim()) {
-      throw new Error('CID-10 ausente na ficha — mapeie a coluna de CID na importação (ou informe um CID padrão) para registrar este paciente.');
-    }
+    // Regra fixa (spec): o CID-10 é SEMPRE H53, independente do arquivo — não
+    // depende de coluna de CID na ficha nem de override. Portanto não bloqueia.
     const dataAtendimentoStr = fmtDate(patient.dataAtendimento);
     this.passo(`Iniciando cadastro de ${nome || 'paciente'} (CNS ${cns})...`);
 
@@ -624,7 +651,8 @@ export class WebAutomator {
       await page.waitForTimeout(1500);
     }
 
-    const cid10Valor = this.valorOverride(overrides, 'problema_diagnostico') || patient.cid10Codigo;
+    // Regra fixa: CID-10 SEMPRE H53, independente do arquivo/override.
+    const cid10Valor = 'H53';
     this.passo(`Registrando diagnóstico CID-10 (${cid10Valor})...`);
     await this.autocompleteComOverride(overrides, 'terminologia_diagnostico', 'terminologia', 'CID-10', 'CID-10');
     await this.autocompleteComOverride(overrides, 'classificacao_diagnostico', 'categoria', 'Principal', 'Principal');
