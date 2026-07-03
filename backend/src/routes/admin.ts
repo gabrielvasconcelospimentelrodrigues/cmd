@@ -870,4 +870,34 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     });
     return updated;
   });
+
+  // REVOGAR um terminal contratado de uma empresa (reduz a cota e a mensalidade
+  // do próximo ciclo). Não deixa revogar abaixo dos terminais já conectados.
+  app.post('/admin/empresas/:id/revogar-terminal', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+    const { data: emp } = await (supabaseAdmin as any)
+      .from('empresas').select('id, nome, tenant_id, terminais_contratados').eq('id', id).maybeSingle();
+    if (!emp) return reply.code(404).send({ error: 'empresa não encontrada.' });
+    const atual = Number(emp.terminais_contratados ?? 0);
+    if (atual <= 0) return reply.code(400).send({ error: 'Esta empresa não tem terminais contratados para revogar.' });
+    // Trava: não revogar abaixo dos logins CMD já conectados (em uso).
+    const { count: configurados } = await supabaseAdmin
+      .from('clinic_accounts').select('id', { head: true, count: 'exact' }).eq('empresa_id', id);
+    if ((configurados ?? 0) > atual - 1) {
+      return reply.code(400).send({ error: `Há ${configurados} terminal(is) conectado(s) nesta empresa. Desconecte um login CMD antes de revogar.` });
+    }
+    await (supabaseAdmin as any).from('empresas').update({ terminais_contratados: atual - 1 }).eq('id', id);
+    // Ajusta o teto (cota total) do assinante.
+    const { data: tenant } = await supabaseAdmin.from('tenants').select('max_terminais, valor_terminal').eq('id', emp.tenant_id).maybeSingle();
+    const valorTerminal = Number((tenant as any)?.valor_terminal ?? 0);
+    await (supabaseAdmin as any).from('tenants')
+      .update({ max_terminais: Math.max(0, Number((tenant as any)?.max_terminais ?? 1) - 1) }).eq('id', emp.tenant_id);
+    await registrarLog({
+      tenantId: emp.tenant_id, categoria: 'terminal', acao: 'terminal.revogado', nivel: 'alerta', ator: ator(req),
+      descricao: `${atorNome(req)} revogou 1 terminal de ${emp.nome} (−${brl(valorTerminal)}/mês a partir do próximo ciclo).`,
+      meta: { empresa_id: id, restante: atual - 1 },
+    });
+    return { ok: true, terminais: atual - 1 };
+  });
 }

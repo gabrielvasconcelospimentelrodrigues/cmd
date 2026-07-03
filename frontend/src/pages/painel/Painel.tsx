@@ -737,40 +737,58 @@ function FichasModal({ upload, onClose, onChange, showToast }: { upload: Upload;
         </div>
 
         {/* Lista */}
-        <div style={{ overflowY: 'auto', padding: '0 8px' }}>
-          {loading ? <div style={{ padding: 30, textAlign: 'center', color: 'var(--c-ink3)' }}>Carregando fichas…</div>
-          : filtradas.length === 0 ? <div style={{ padding: 30, textAlign: 'center', color: 'var(--c-ink3)' }}>Nenhuma ficha.</div>
-          : filtradas.map((f) => (
-            <div key={f.id} style={{ borderBottom: '1px solid var(--c-border)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px' }}>
+        <div style={{ overflowY: 'auto', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--c-ink3)' }}>Carregando fichas…</div>
+          : filtradas.length === 0 ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--c-ink3)' }}>Nenhuma ficha.</div>
+          : filtradas.map((f) => {
+            const aberto = editId === f.id;
+            const t = fichaTone(f.status); const tc = t === 'ok' ? 'var(--c-okfg)' : t === 'proc' ? 'var(--c-softfg)' : 'var(--c-warnfg)'; const tbg = t === 'ok' ? 'var(--c-oksoft)' : t === 'proc' ? 'var(--c-soft)' : 'var(--c-warnsoft)';
+            return (
+            <div key={f.id} style={{ border: `1px solid ${aberto ? 'var(--c-blue)' : 'var(--c-border)'}`, borderRadius: 12, overflow: 'hidden', background: aberto ? 'var(--c-surface2)' : 'transparent' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 16px' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.nome || '—'}</div>
-                  <div className="ia-mono" style={{ color: 'var(--c-ink3)', fontSize: 12 }}>CNS {f.cns || '—'} · CID {f.cid10_codigo || '—'} · {f.data_atendimento ? f.data_atendimento.slice(0, 10).split('-').reverse().join('/') : 's/ data'}</div>
+                  <div style={{ color: 'var(--c-ink)', fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.nome || '—'}</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 18px', marginTop: 6 }}>
+                    <Meta label="CNS" v={f.cns} mono />
+                    <Meta label="CID" v={f.cid10_codigo} />
+                    <Meta label="Atend." v={f.data_atendimento ? f.data_atendimento.slice(0, 10).split('-').reverse().join('/') : ''} />
+                    <Meta label="Médico" v={f.medico_nome} />
+                  </div>
                 </div>
-                {(() => { const t = fichaTone(f.status); const c = t === 'ok' ? 'var(--c-okfg)' : t === 'proc' ? 'var(--c-softfg)' : 'var(--c-warnfg)'; return <span style={{ fontSize: 11, fontWeight: 700, color: c, flex: 'none' }}>{toneLabel(t)}</span>; })()}
-                <button onClick={() => (editId === f.id ? setEditId(null) : abrirEdicao(f))} className="ia-btn-outline" style={{ height: 32, padding: '0 12px', fontSize: 12, flex: 'none' }}>{editId === f.id ? 'Fechar' : 'Editar'}</button>
+                <span style={{ fontSize: 11, fontWeight: 700, color: tc, background: tbg, padding: '4px 10px', borderRadius: 999, flex: 'none', whiteSpace: 'nowrap' }}>{toneLabel(t)}</span>
+                <button onClick={() => (aberto ? setEditId(null) : abrirEdicao(f))} className="ia-btn-outline" style={{ height: 34, padding: '0 14px', fontSize: 13, flex: 'none' }}>{aberto ? 'Fechar' : 'Editar'}</button>
               </div>
-              {editId === f.id && (
-                <div style={{ padding: '4px 14px 16px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+              {aberto && (
+                <div style={{ padding: '6px 16px 18px', borderTop: '1px solid var(--c-border)' }}>
+                  <div style={{ color: 'var(--c-ink3)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em', margin: '14px 0 10px' }}>Editar ficha</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
                     {CAMPOS_FICHA.map((c) => (
                       <div key={String(c.k)}>
-                        <label style={{ color: 'var(--c-ink3)', fontSize: 11, display: 'block', marginBottom: 3 }}>{c.label}</label>
+                        <label style={{ color: 'var(--c-ink3)', fontSize: 11, display: 'block', marginBottom: 4 }}>{c.label}</label>
                         <input type={c.type ?? 'text'} value={(form[c.k] as string) ?? ''} onChange={(e) => setForm({ ...form, [c.k]: e.target.value })} style={inp} />
                       </div>
                     ))}
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
                     <button onClick={() => setEditId(null)} className="ia-btn-outline" style={{ padding: '8px 14px', fontSize: 13 }}>Cancelar</button>
                     <button onClick={salvarUma} disabled={salvando} className="ia-btn" style={{ padding: '8px 16px' }}>{salvando ? 'Salvando…' : 'Salvar ficha'}</button>
                   </div>
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
+  );
+}
+
+function Meta({ label, v, mono }: { label: string; v?: string | null; mono?: boolean }) {
+  return (
+    <span style={{ fontSize: 12.5, color: 'var(--c-ink3)', minWidth: 0 }}>
+      {label}: <span className={mono ? 'ia-mono' : undefined} style={{ color: 'var(--c-ink2)', fontWeight: 500 }}>{v || '—'}</span>
+    </span>
   );
 }
 

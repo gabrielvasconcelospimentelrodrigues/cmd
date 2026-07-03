@@ -285,6 +285,51 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
+  // Campos editáveis de uma ficha.
+  const camposFicha = (b: Record<string, unknown>): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const k of ['nome', 'cns', 'data_atendimento', 'cid10_codigo', 'medico_nome', 'data_nascimento']) {
+      if (b[k] !== undefined) out[k] = b[k] === '' ? null : b[k];
+    }
+    return out;
+  };
+
+  // ---- Editar UMA ficha -----------------------------------------------------
+  app.patch('/patients/:id', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+    const { data: pr } = await (supabaseAdmin as any).from('patient_records').select('id, upload_id').eq('id', id).maybeSingle();
+    if (!pr) return reply.code(404).send({ error: 'ficha não encontrada.' });
+    const { data: up } = await (supabaseAdmin as any).from('uploads').select('id, clinic_accounts(tenant_id), empresas(tenant_id)').eq('id', pr.upload_id).maybeSingle();
+    const isOwner = up && ((up as any).clinic_accounts?.tenant_id === req.tenant!.id || (up as any).empresas?.tenant_id === req.tenant!.id);
+    if (!isOwner) return reply.code(404).send({ error: 'ficha não encontrada.' });
+    const patch = camposFicha((req.body ?? {}) as Record<string, unknown>);
+    if (Object.keys(patch).length === 0) return reply.code(400).send({ error: 'nada para atualizar.' });
+    const { data, error } = await (supabaseAdmin as any).from('patient_records').update(patch).eq('id', id).select('*').single();
+    if (error) return reply.code(400).send({ error: error.message });
+    return data;
+  });
+
+  // ---- Editar em MASSA as fichas de um envio -------------------------------
+  // Aplica os campos enviados a TODAS as fichas do envio, ou só às `ids`
+  // informadas (linhas marcadas na tabela).
+  app.patch('/uploads/:id/patients', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+    const { data: up } = await (supabaseAdmin as any).from('uploads').select('id, clinic_accounts(tenant_id), empresas(tenant_id)').eq('id', id).maybeSingle();
+    const isOwner = up && ((up as any).clinic_accounts?.tenant_id === req.tenant!.id || (up as any).empresas?.tenant_id === req.tenant!.id);
+    if (!isOwner) return reply.code(404).send({ error: 'envio não encontrado.' });
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const patch = camposFicha(body);
+    if (Object.keys(patch).length === 0) return reply.code(400).send({ error: 'informe ao menos um campo para aplicar.' });
+    const ids = Array.isArray(body.ids) ? (body.ids as unknown[]).map(Number).filter((n) => !Number.isNaN(n)) : null;
+    let q = (supabaseAdmin as any).from('patient_records').update(patch).eq('upload_id', id);
+    if (ids && ids.length > 0) q = q.in('id', ids);
+    const { data, error } = await q.select('id');
+    if (error) return reply.code(400).send({ error: error.message });
+    return { ok: true, atualizadas: (data ?? []).length };
+  });
+
   // ---- Excluir um envio (soft-delete) --------------------------------------
   app.delete('/uploads/:id', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
     const id = Number((req.params as { id: string }).id);

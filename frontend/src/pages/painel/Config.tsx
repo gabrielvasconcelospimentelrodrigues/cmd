@@ -104,7 +104,7 @@ function AccountCard({ conta, empresas, onChange, showToast }: { conta: ClinicAc
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 20 }}>
+      <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 20 }}>
         <div>
           <label className="ia-label">Empresa vinculada (terminal)</label>
           <select value={empresaId} onChange={(e) => setEmpresaId(Number(e.target.value) || '')} className="ia-input" style={{ width: '100%' }}>
@@ -136,7 +136,7 @@ function AccountCard({ conta, empresas, onChange, showToast }: { conta: ClinicAc
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 20 }}>
+      <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 20 }}>
         <div>
           <label className="ia-label">Janela de horário</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -332,7 +332,7 @@ function Custos({ tenant, onChange, showToast }: { tenant: Tenant | null; onChan
         Compõem o <b>custo real</b> de um funcionário, usado pela IA para calcular a economia (tempo, dinheiro e funcionários poupados) com base nos cadastros automáticos.
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 18 }}>
+      <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 18 }}>
         <Field label="Salário bruto médio (R$)" hint="Salário bruto mensal médio de um funcionário que faria esse trabalho manualmente (sem encargos/benefícios).">{numInput(salario, setSalario)}</Field>
         <Field label="Encargos (%)" hint="Percentual de encargos sobre o salário (INSS, FGTS, férias, 13º, etc.). Ex.: 80 = 80% a mais sobre o salário bruto.">{numInput(encargos, setEncargos, '1')}</Field>
         <Field label="Benefícios mensais (R$)" hint="Soma mensal de benefícios por funcionário: VT, VR/VA, plano de saúde, etc.">{numInput(beneficios, setBeneficios)}</Field>

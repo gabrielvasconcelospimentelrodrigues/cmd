@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Sun, Moon, ArrowLeft } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { Shell, Field, PasswordField, useTheme, useToast, Toast } from '../components/iacmd/ui';
+import { LogoMark, Field, PasswordField, useTheme, useToast, Toast } from '../components/iacmd/ui';
+import { AgentSphere } from '../components/iacmd/AgentSphere';
 
 const center = { position: 'relative' as const, zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '30px 20px 60px' };
 const emailRe = /.+@.+\..+/;

@@ -34,7 +34,9 @@ async function buildServer() {
 
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(cors, {
-    origin: env.CORS_ORIGINS,
+    // Origens do env + o domínio de produção (garante o iacmd.com.br mesmo se
+    // a env não estiver configurada). Preview URLs da Vercel entram via env.
+    origin: [...new Set([...env.CORS_ORIGINS, 'https://iacmd.com.br', 'https://www.iacmd.com.br'])],
     credentials: true,
   });
   await app.register(multipart, {

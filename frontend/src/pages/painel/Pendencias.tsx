@@ -46,7 +46,7 @@ export default function Pendencias({ patients, onChange, showToast }: { patients
         <button onClick={() => acao('manual', selIds)} className="ia-btn-outline" disabled={busy || !sel.size}><Check size={16} /> Feito manualmente</button>
       </div>
 
-      <Card style={{ overflow: 'hidden' }}>
+      <Card className="r-scroll-x" style={{ overflow: 'hidden' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '40px 1.6fr 1fr 110px 150px 1.4fr 100px', padding: '12px 18px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)', fontSize: 12, fontWeight: 600, color: 'var(--c-ink3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
           <span /><span>Nome</span><span>CNS</span><span>Atend.</span><span>Envio</span><span>Motivo</span><span />
         </div>

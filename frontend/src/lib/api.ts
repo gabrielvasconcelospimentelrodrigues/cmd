@@ -1,6 +1,8 @@
 import { supabase } from './supabase';
 
-const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3333';
+// URL da API — vem da env VITE_API_URL (setada no projeto Vercel do frontend).
+// Em dev cai para o backend local.
+const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:3333';
 
 export interface ApiError extends Error {
   status?: number;
