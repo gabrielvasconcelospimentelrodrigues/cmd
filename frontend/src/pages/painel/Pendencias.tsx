@@ -59,7 +59,12 @@ export default function Pendencias({ patients, onChange, showToast }: { patients
             <span className="ia-mono" style={{ color: 'var(--c-ink2)', fontSize: 12 }}>{p.cns || '—'}</span>
             <span style={{ color: 'var(--c-ink2)', fontSize: 13 }}>{p.data_atendimento ?? '—'}</span>
             <span className="ia-mono" style={{ color: 'var(--c-softfg)', fontSize: 12 }}>Envio #{p.upload_id}</span>
-            <span style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{p.error_message || (p.status === 'needs_review' ? 'Dados incompletos — revisar.' : 'Falha no cadastro.')}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              {(p.error_message || '').toLowerCase().includes('duplicad') && (
+                <span style={{ flex: 'none', fontSize: 10.5, fontWeight: 700, color: 'var(--c-warnfg)', background: 'var(--c-warnsoft)', padding: '2px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}>DUPLICADO</span>
+              )}
+              <span style={{ color: 'var(--c-ink3)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.error_message || (p.status === 'needs_review' ? 'Dados incompletos — revisar.' : 'Falha no cadastro.')}</span>
+            </span>
             <button onClick={() => acao('retry', [p.id])} disabled={busy} className="ia-link" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', justifySelf: 'end' }}><RefreshCw size={14} /> Reenviar</button>
           </div>
         ))}

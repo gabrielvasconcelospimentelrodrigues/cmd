@@ -6,7 +6,7 @@ import {
 import { useAuth } from '../auth/AuthProvider';
 import { useTheme, LogoMark, useToast, Toast, PasswordField, type ToastData } from '../components/iacmd/ui';
 import ProfileSecurity from '../components/iacmd/ProfileSecurity';
-import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
+import { apiGet, apiPost, apiPatch, apiDelete, apiPut } from '../lib/api';
 import { Switch, brl } from './painel/parts';
 import type { Plano, TerminalRequest, Fatura } from '../lib/types';
 
@@ -1223,12 +1223,84 @@ function LancForm({ onAdd, busy }: { onAdd: (l: { tipo: 'custo' | 'receita'; cat
   );
 }
 
+interface Precos { implantacao: number; terminais: number[]; adicional: number }
+const ordinal = (n: number) => `${n}º`;
+
+function TabelaPrecos({ showToast, onSaved }: { showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void; onSaved: () => void }) {
+  const [p, setP] = useState<Precos | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { (async () => { try { setP(await apiGet<Precos>('/admin/precos')); } catch { setP(null); } })(); }, []);
+
+  const salvar = async () => {
+    if (!p) return;
+    setSaving(true);
+    try {
+      const novo = await apiPut<Precos>('/admin/precos', p);
+      setP(novo); onSaved();
+      showToast({ title: 'Tabela de preços salva', msg: '', kind: 'ok' });
+    } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); } finally { setSaving(false); }
+  };
+
+  if (!p) return <Card style={{ padding: 20, color: 'var(--c-ink3)', fontSize: 14 }}>Carregando tabela de preços…</Card>;
+
+  const setTier = (i: number, v: string) => { const t = [...p.terminais]; t[i] = Math.max(0, Number(v) || 0); setP({ ...p, terminais: t }); };
+  const addTier = () => setP({ ...p, terminais: [...p.terminais, p.terminais[p.terminais.length - 1] ?? 0] });
+  const rmTier = (i: number) => { if (p.terminais.length <= 1) return; setP({ ...p, terminais: p.terminais.filter((_, j) => j !== i) }); };
+  const exemplo = (n: number) => { let s = 0; for (let k = 1; k <= n; k++) s += p.terminais[k - 1] ?? p.adicional; return s; };
+  const inp: React.CSSProperties = { boxSizing: 'border-box', width: '100%', height: 40, background: 'var(--c-input)', border: '1.5px solid var(--c-border2)', borderRadius: 10, padding: '0 12px', color: 'var(--c-ink)', fontFamily: 'inherit', fontSize: 14 };
+
+  return (
+    <Card style={{ padding: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginBottom: 6 }}>
+        <div>
+          <div style={{ color: 'var(--c-ink)', fontSize: 16, fontWeight: 700 }}>Tabela de preços</div>
+          <div style={{ color: 'var(--c-ink3)', fontSize: 12.5, marginTop: 1 }}>Valor escalonado por terminal (desconto progressivo) + implantação. Vale para todos os assinantes.</div>
+        </div>
+        <button onClick={salvar} disabled={saving} className="ia-btn" style={{ padding: '10px 18px' }}>{saving ? 'Salvando…' : 'Salvar tabela'}</button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 20, marginTop: 14, alignItems: 'start' }} className="r-cols-side">
+        {/* Implantação + adicional */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <label className="ia-label">Implantação (única, R$)</label>
+            <input value={p.implantacao} onChange={(e) => setP({ ...p, implantacao: Math.max(0, Number(e.target.value) || 0) })} className="ia-mono" style={inp} />
+          </div>
+          <div>
+            <label className="ia-label">Do {ordinal(p.terminais.length + 1)} em diante (R$)</label>
+            <input value={p.adicional} onChange={(e) => setP({ ...p, adicional: Math.max(0, Number(e.target.value) || 0) })} className="ia-mono" style={inp} />
+            <div style={{ color: 'var(--c-ink3)', fontSize: 11.5, marginTop: 5 }}>Preço de cada terminal além da lista ao lado.</div>
+          </div>
+        </div>
+
+        {/* Faixas por terminal */}
+        <div>
+          <label className="ia-label">Preço por posição do terminal</label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
+            {p.terminais.map((v, i) => (
+              <div key={i} style={{ position: 'relative' }}>
+                <div style={{ position: 'absolute', top: -8, left: 8, background: 'var(--c-surface)', padding: '0 5px', color: 'var(--c-softfg)', fontSize: 11, fontWeight: 700 }}>{ordinal(i + 1)} terminal</div>
+                <input value={v} onChange={(e) => setTier(i, e.target.value)} className="ia-mono" style={{ ...inp, paddingRight: p.terminais.length > 1 ? 30 : 12 }} />
+                {p.terminais.length > 1 && <button onClick={() => rmTier(i)} title="Remover faixa" style={{ position: 'absolute', right: 6, top: 10, width: 20, height: 20, borderRadius: 6, border: 'none', background: 'transparent', color: 'var(--c-ink3)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}><X size={14} /></button>}
+              </div>
+            ))}
+            <button onClick={addTier} className="ia-btn-outline" style={{ height: 40, fontSize: 13, borderStyle: 'dashed' }}>+ faixa</button>
+          </div>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 14, color: 'var(--c-ink3)', fontSize: 12.5 }}>
+            <span>Exemplos:</span>
+            {[1, 2, 3, 5].map((n) => <span key={n}><b style={{ color: 'var(--c-ink2)' }}>{n} term.</b> = {brl(exemplo(n))}/mês</span>)}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void }) {
   const [sel, setSel] = useState<number | null>(null);
   const [plano, setPlano] = useState<Plano | null>(null);
   const [loading, setLoading] = useState(false);
-  const [vt, setVt] = useState('');
-  const [vi, setVi] = useState('');
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [busy, setBusy] = useState<number | 'gerar' | null>(null);
 
@@ -1240,7 +1312,7 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
     setSel(id); setLoading(true); setPlano(null); setFaturas([]);
     try {
       const p = await apiGet<Plano>(`/admin/tenants/${id}/plano`);
-      setPlano(p); setVt(String(p.valor_terminal)); setVi(String(p.valor_implantacao));
+      setPlano(p);
       await carregarFaturas(id);
     } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); } finally { setLoading(false); }
   }, [showToast, carregarFaturas]);
@@ -1280,7 +1352,9 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
   };
 
   return (
-    <div className="r-cols-side" style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 16, alignItems: 'start' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <TabelaPrecos showToast={showToast} onSaved={() => { if (sel) void abrir(sel); }} />
+      <div className="r-cols-side" style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 16, alignItems: 'start' }}>
       <Card style={{ padding: 8 }}>
         <div style={{ color: 'var(--c-ink3)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', padding: '8px 10px' }}>Assinantes</div>
         {tenants.length === 0 ? <div style={{ padding: 14, color: 'var(--c-ink3)', fontSize: 13 }}>Nenhum.</div> : tenants.map((t) => (
@@ -1303,25 +1377,10 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
             </div>
 
             <Card style={{ padding: 20 }}>
-              <div style={{ color: 'var(--c-ink)', fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Valores do assinante</div>
-              <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <div>
-                  <label className="ia-label">Mensalidade por terminal (R$)</label>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <input value={vt} onChange={(e) => setVt(e.target.value)} className="ia-input ia-mono" style={{ width: 'auto', flex: 1 }} />
-                    <button onClick={() => patchTenant({ valor_terminal: Number(vt) })} className="ia-btn-outline" style={{ padding: '0 14px' }}>Salvar</button>
-                  </div>
-                </div>
-                <div>
-                  <label className="ia-label">Implantação (R$, única)</label>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <input value={vi} onChange={(e) => setVi(e.target.value)} className="ia-input ia-mono" style={{ width: 'auto', flex: 1 }} />
-                    <button onClick={() => patchTenant({ valor_implantacao: Number(vi) })} className="ia-btn-outline" style={{ padding: '0 14px' }}>Salvar</button>
-                  </div>
-                </div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
-                <span style={{ color: 'var(--c-ink2)', fontSize: 13 }}>Implantação paga</span>
+              <div style={{ color: 'var(--c-ink)', fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Plano do assinante</div>
+              <div style={{ color: 'var(--c-ink3)', fontSize: 12.5, marginBottom: 14 }}>Os valores seguem a <b>Tabela de preços</b> (global, acima). {plano.total_terminais} terminal(is) → <b>{brl(plano.mensal)}/mês</b>. Próximo terminal custará <b>{brl((plano as { proximo_terminal?: number }).proximo_terminal ?? 0)}</b>.</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ color: 'var(--c-ink2)', fontSize: 13 }}>Implantação ({brl(plano.valor_implantacao)}) paga</span>
                 <Switch on={plano.implantacao_paga} onClick={() => patchTenant({ implantacao_paga: !plano.implantacao_paga })} />
                 <span style={{ fontSize: 12, color: plano.implantacao_paga ? 'var(--c-okfg)' : 'var(--c-warnfg)' }}>{plano.implantacao_paga ? 'paga' : 'pendente'}</span>
               </div>
@@ -1361,6 +1420,7 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
             </Card>
           </div>
         )}
+      </div>
       </div>
     </div>
   );

@@ -108,6 +108,8 @@ export interface EmpresaPlano {
   terminais: number; // contratados (faturados)
   configurados?: number; // contas CMD conectadas
   mensal: number;
+  cancelar_terminais?: number; // terminais agendados para descontratar
+  cancelar_em?: string | null; // data em que saem da conta
 }
 
 export interface Plano {

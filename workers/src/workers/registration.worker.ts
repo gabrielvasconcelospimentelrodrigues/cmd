@@ -154,11 +154,11 @@ export function startRegistrationWorker(): Worker<UploadJob> {
                 overrides: p.automation_overrides ?? {},
               };
               // DEDUP: se este CNS+data já foi cadastrado nesta conta (outra
-              // lista/retomada), NÃO cadastra de novo — evita duplicata no gov.
+              // lista/retomada), NÃO cadastra de novo — manda para Pendências
+              // como duplicado, para tratamento manual (envio manual).
               if (await jaCadastrado(conta.id, p.cns, p.data_atendimento, p.id)) {
-                await marcarPaciente(p.id, 'registered');
-                registered++;
-                await logEntry(uploadId, 'INFO', `${p.nome || p.cns}: já cadastrado (mesmo CNS+data) — duplicata ignorada.`);
+                await marcarPaciente(p.id, 'needs_review', 'Cadastro duplicado — mesmo CNS já cadastrado nesta data de atendimento.');
+                await logEntry(uploadId, 'WARN', `${p.nome || p.cns}: duplicado (mesmo CNS+data) — enviado para Pendências.`);
                 await atualizarContadores(uploadId, registered, errored);
                 continue;
               }

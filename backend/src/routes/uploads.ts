@@ -8,6 +8,58 @@ import type { Database, UploadOrigem } from '../types/database';
 const BUCKET = 'uploads';
 const ORIGENS_VALIDAS: UploadOrigem[] = ['ficha_completa', 'extrator', 'dados_importados'];
 
+const MSG_DUPLICADO = 'Cadastro duplicado — mesmo CNS já cadastrado nesta data de atendimento.';
+
+/**
+ * Detecta duplicados ANTES de cadastrar: um paciente pendente é duplicado se o
+ * mesmo CNS + data de atendimento já está cadastrado (em outra ficha do mesmo
+ * assinante) OU se repete dentro da própria lista. Os duplicados vão para
+ * PENDÊNCIAS (needs_review), para o assinante tratar manualmente. Retorna
+ * quantos foram marcados.
+ */
+async function marcarDuplicados(uploadId: number, tenantId: number): Promise<number> {
+  const { data: pend } = await (supabaseAdmin as any)
+    .from('patient_records')
+    .select('id, cns, data_atendimento')
+    .eq('upload_id', uploadId)
+    .eq('status', 'pending_registration')
+    .order('id', { ascending: true });
+  const pendentes = (pend ?? []) as { id: number; cns: string | null; data_atendimento: string | null }[];
+  if (pendentes.length === 0) return 0;
+
+  // Cadastros já existentes (mesmo assinante) — chave CNS|data.
+  const { data: cas } = await supabaseAdmin.from('clinic_accounts').select('id').eq('tenant_id', tenantId);
+  const caIds = (cas ?? []).map((c) => c.id);
+  const jaCadastrados = new Set<string>();
+  if (caIds.length > 0) {
+    const { data: reg } = await (supabaseAdmin as any)
+      .from('patient_records')
+      .select('cns, data_atendimento')
+      .in('clinic_account_id', caIds)
+      .in('status', ['registered', 'verified_ok', 'verified_divergent', 'done_manually']);
+    for (const r of (reg ?? []) as { cns: string | null; data_atendimento: string | null }[]) {
+      if (r.cns && r.data_atendimento) jaCadastrados.add(`${r.cns}|${r.data_atendimento}`);
+    }
+  }
+
+  // Marca duplicados: contra os já cadastrados OU repetidos na própria lista.
+  const vistos = new Set<string>();
+  const dupIds: number[] = [];
+  for (const p of pendentes) {
+    if (!p.cns || !p.data_atendimento) continue;
+    const chave = `${p.cns}|${p.data_atendimento}`;
+    if (jaCadastrados.has(chave) || vistos.has(chave)) dupIds.push(p.id);
+    else vistos.add(chave);
+  }
+  if (dupIds.length > 0) {
+    await (supabaseAdmin as any)
+      .from('patient_records')
+      .update({ status: 'needs_review', error_message: MSG_DUPLICADO })
+      .in('id', dupIds);
+  }
+  return dupIds.length;
+}
+
 /**
  * Rotas de upload — TODAS protegidas por auth e escopadas à clínica (tenant)
  * do usuário autenticado. Um usuário nunca enxerga/usa dados de outra clínica.
@@ -349,6 +401,18 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(204).send();
   });
 
+  // ---- Verificar duplicados de um envio (manda os duplicados p/ Pendências) -
+  app.post('/uploads/:id/verificar-duplicados', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+    const { data: up } = await (supabaseAdmin as any)
+      .from('uploads').select('id, clinic_accounts(tenant_id), empresas(tenant_id)').eq('id', id).maybeSingle();
+    const isOwner = up && ((up as any).clinic_accounts?.tenant_id === req.tenant!.id || (up as any).empresas?.tenant_id === req.tenant!.id);
+    if (!isOwner) return reply.code(404).send({ error: 'envio não encontrado.' });
+    const duplicados = await marcarDuplicados(id, req.tenant!.id);
+    return { ok: true, duplicados };
+  });
+
   // ---- Controle da automação de um envio (iniciar/pausar/parar/retomar) ----
   app.post('/uploads/:id/:acao', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
     const params = req.params as { id: string; acao: string };
@@ -432,8 +496,10 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
       }
       if (Object.keys(patch).length > 0) await (supabaseAdmin as any).from('uploads').update(patch).eq('id', id);
       if (!jaRodando) {
+        // ANTES de começar os cadastros: manda os duplicados para Pendências.
+        const dups = await marcarDuplicados(id, req.tenant!.id);
         await registrationQueue().add('registrar', { uploadId: id });
-        await registrarLog({ tenantId: req.tenant!.id, categoria: 'automacao', acao: 'automacao.iniciada', nivel: 'sucesso', ator: ator(req), descricao: `${atorNome(req)} iniciou a automação da lista "${nomeLista}"${slot ? ` no terminal ${slot}` : ''}.`, meta: { upload_id: id, terminal_slot: slot } });
+        await registrarLog({ tenantId: req.tenant!.id, categoria: 'automacao', acao: 'automacao.iniciada', nivel: 'sucesso', ator: ator(req), descricao: `${atorNome(req)} iniciou a automação da lista "${nomeLista}"${slot ? ` no terminal ${slot}` : ''}${dups > 0 ? ` · ${dups} duplicado(s) enviado(s) para Pendências` : ''}.`, meta: { upload_id: id, terminal_slot: slot, duplicados: dups } });
       }
     }
     return { ok: true };

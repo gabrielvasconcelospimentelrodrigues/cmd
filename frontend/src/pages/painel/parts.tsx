@@ -18,9 +18,11 @@ const TONE: Record<Tone, { fg: string; bg: string; dot: string }> = {
 
 export function StatusPill({ tone, label }: { tone: Tone; label?: string }) {
   const t = TONE[tone];
+  // justifySelf/alignSelf 'start' + width:'max-content' impedem o pill de
+  // esticar quando é filho direto de um grid (senão preenche a coluna toda).
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '4px 11px', borderRadius: 999, fontSize: 12, fontWeight: 600, color: t.fg, background: t.bg }}>
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: t.dot }} />
+    <span style={{ display: 'inline-flex', width: 'max-content', maxWidth: '100%', justifySelf: 'start', alignSelf: 'center', alignItems: 'center', gap: 6, padding: '3px 9px', borderRadius: 999, fontSize: 12, fontWeight: 600, color: t.fg, background: t.bg, whiteSpace: 'nowrap' }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: t.dot, flex: 'none' }} />
       {label ?? toneLabel(tone)}
     </span>
   );

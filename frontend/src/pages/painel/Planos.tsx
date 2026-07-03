@@ -14,6 +14,8 @@ export default function Planos({ onChange, showToast }: { tenant?: Tenant | null
   const [novaEmpresa, setNovaEmpresa] = useState(false);
   const [solicitando, setSolicitando] = useState(false);
   const [confirmar, setConfirmar] = useState<{ id: number; nome: string } | null>(null); // confirmação de contratação
+  const [descontratar, setDescontratar] = useState<{ id: number; nome: string } | null>(null); // confirmação de descontratação
+  const [processando, setProcessando] = useState(false);
   const [verDetalhamento, setVerDetalhamento] = useState(false);
 
   const carregar = useCallback(async () => {
@@ -47,6 +49,28 @@ export default function Planos({ onChange, showToast }: { tenant?: Tenant | null
       setSolicitando(false);
     }
   };
+
+  const confirmarDescontratar = async () => {
+    if (!descontratar) return;
+    setProcessando(true);
+    try {
+      await apiPost(`/empresas/${descontratar.id}/descontratar-terminal`, {});
+      setDescontratar(null);
+      await carregar();
+      if (onChange) await onChange();
+      showToast({ title: 'Terminal descontratado', msg: 'A cobrança segue até o fim do mês.', kind: 'ok' });
+    } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); } finally { setProcessando(false); }
+  };
+  const desfazerCancelamento = async (empresaId: number) => {
+    setProcessando(true);
+    try {
+      await apiPost(`/empresas/${empresaId}/desfazer-cancelamento`, {});
+      await carregar();
+      if (onChange) await onChange();
+      showToast({ title: 'Cancelamento desfeito', msg: '', kind: 'ok' });
+    } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); } finally { setProcessando(false); }
+  };
+  const fimDoMes = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth() + 1, 0).toLocaleDateString('pt-BR'); };
 
   const hojeISO = new Date().toISOString().slice(0, 10);
 
@@ -98,19 +122,33 @@ export default function Planos({ onChange, showToast }: { tenant?: Tenant | null
                 </div>
               </div>
 
-              <div style={{ padding: '14px 20px', background: 'var(--c-surface2)', borderTop: '1px solid var(--c-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
+              <div style={{ padding: '14px 20px', background: 'var(--c-surface2)', borderTop: '1px solid var(--c-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
                 <div style={{ color: 'var(--c-ink2)', fontSize: 13 }}>
                   Cota de terminais contratada: <b>{e.terminais}</b> terminal(is)
                 </div>
-                <button
-                  onClick={() => setConfirmar({ id: e.id, nome: e.nome })}
-                  disabled={temPendente || solicitando}
-                  className="ia-btn"
-                  style={{ padding: '8px 14px', fontSize: 13 }}
-                >
-                  {temPendente ? 'Aguardando liberação' : solicitando ? 'Solicitando...' : 'Contratar Novo Terminal'}
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  {e.terminais - (e.cancelar_terminais ?? 0) > 0 && (
+                    <button onClick={() => setDescontratar({ id: e.id, nome: e.nome })} disabled={processando} style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, color: 'var(--c-errfg)', textDecoration: 'underline', padding: 0 }}>Descontratar terminal</button>
+                  )}
+                  <button
+                    onClick={() => setConfirmar({ id: e.id, nome: e.nome })}
+                    disabled={temPendente || solicitando}
+                    className="ia-btn"
+                    style={{ padding: '8px 14px', fontSize: 13 }}
+                  >
+                    {temPendente ? 'Aguardando liberação' : solicitando ? 'Solicitando...' : 'Contratar Novo Terminal'}
+                  </button>
+                </div>
               </div>
+
+              {(e.cancelar_terminais ?? 0) > 0 && (
+                <div style={{ padding: '10px 20px', background: 'var(--c-warnsoft)', borderTop: '1px solid var(--c-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                  <span style={{ color: 'var(--c-warnfg)', fontSize: 12.5, fontWeight: 600 }}>
+                    ⏳ {e.cancelar_terminais} terminal(is) descontratado(s) — cobrança até {e.cancelar_em ? new Date(new Date(e.cancelar_em + 'T00:00:00').getTime() - 86400000).toLocaleDateString('pt-BR') : fimDoMes()}, depois sai da conta.
+                  </span>
+                  <button onClick={() => desfazerCancelamento(e.id)} disabled={processando} style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600, color: 'var(--c-softfg)', textDecoration: 'underline', padding: 0 }}>Desfazer</button>
+                </div>
+              )}
 
               {empresaRequests.length > 0 && (
                 <div style={{ padding: '12px 20px', background: 'var(--c-surface2)', borderTop: '1px solid var(--c-border)' }}>
@@ -181,6 +219,25 @@ export default function Planos({ onChange, showToast }: { tenant?: Tenant | null
             <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
               <button onClick={() => setConfirmar(null)} className="ia-btn-outline" style={{ flex: 1 }}>Cancelar</button>
               <button onClick={() => solicitarTerminal(confirmar.id)} disabled={solicitando} className="ia-btn" style={{ flex: 1, padding: 12 }}>{solicitando ? 'Enviando…' : 'Confirmar contratação'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {descontratar && (
+        <div onClick={() => setDescontratar(null)} style={{ position: 'fixed', inset: 0, zIndex: 110, background: 'rgba(7,11,22,.62)', backdropFilter: 'blur(3px)', display: 'grid', placeItems: 'center', padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: 440, maxWidth: '100%', background: 'var(--c-surface)', border: '1px solid var(--c-border)', borderRadius: 18, boxShadow: 'var(--c-shadow)', padding: 26 }}>
+            <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--c-warnsoft)', color: 'var(--c-warnfg)', display: 'grid', placeItems: 'center' }}><X size={24} /></div>
+            <h3 style={{ color: 'var(--c-ink)', fontSize: 20, fontWeight: 700, margin: '16px 0 0' }}>Descontratar terminal?</h3>
+            <p style={{ color: 'var(--c-ink2)', fontSize: 14, lineHeight: 1.6, margin: '10px 0 0' }}>
+              Você está descontratando <b>1 terminal</b> de <b>{descontratar.nome}</b>. Você <b>mantém a cobrança até {fimDoMes()}</b> (fim do período já contratado) e, a partir do próximo mês, ele <b>sai da sua conta e não gera mais cobrança</b>.
+            </p>
+            <div style={{ background: 'var(--c-surface2)', borderRadius: 10, padding: '10px 14px', marginTop: 14, fontSize: 12.5, color: 'var(--c-ink3)' }}>
+              O terminal continua funcionando normalmente até lá. Você pode <b>desfazer</b> o cancelamento a qualquer momento antes dessa data.
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
+              <button onClick={() => setDescontratar(null)} className="ia-btn-outline" style={{ flex: 1 }}>Voltar</button>
+              <button onClick={confirmarDescontratar} disabled={processando} className="ia-btn" style={{ flex: 1, padding: 12, background: 'var(--c-warn)' }}>{processando ? 'Processando…' : 'Confirmar'}</button>
             </div>
           </div>
         </div>

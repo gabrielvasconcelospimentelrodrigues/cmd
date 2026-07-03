@@ -67,7 +67,9 @@ export default function ProfileSecurity({ onClose, showToast, papelLabel }: { on
   };
 
   const iniciarEnroll = async () => {
-    const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp', friendlyName: `IACMD ${Date.now()}` });
+    // issuer = nome que aparece no app autenticador (Google Authenticator etc.).
+    // Sem ele, o Supabase usava o host (localhost). friendlyName é o rótulo interno.
+    const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp', friendlyName: `IA-CMD ${Date.now()}`, issuer: 'IA-CMD' });
     if (error || !data) return showToast({ title: 'Falha ao iniciar 2FA', msg: error?.message ?? '', kind: 'err' });
     setEnroll({ id: data.id, qr: data.totp.qr_code, secret: data.totp.secret });
     setCodigo('');
