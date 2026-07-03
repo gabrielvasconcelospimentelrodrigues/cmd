@@ -53,7 +53,7 @@ export default function Planos({ onChange, showToast }: { tenant?: Tenant | null
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       {/* Resumo */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14 }}>
+      <div className="r-grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14 }}>
         <Resumo label="Mensalidade" valor={brl(plano.mensal)} sub={`${plano.total_terminais} terminal(is) × ${brl(plano.valor_terminal)}`} destaque />
         <Resumo label="Terminais não alocados" valor={String(plano.nao_alocados)} sub={plano.nao_alocados > 0 ? 'Ação necessária: vincular nas Configurações' : 'Tudo alocado'} alerta={plano.nao_alocados > 0} />
         <Resumo label="Implantação (única)" valor={brl(plano.valor_implantacao)} sub={plano.implantacao_paga ? 'Paga' : 'Pendente'} pago={plano.implantacao_paga} />
@@ -62,7 +62,7 @@ export default function Planos({ onChange, showToast }: { tenant?: Tenant | null
       {/* Como funciona o plano */}
       <Card style={{ padding: 18 }}>
         <div style={{ color: 'var(--c-ink2)', fontSize: 13, lineHeight: 1.7 }}>
-          Seu plano é por <b>terminal de automação</b> — cada terminal equivale a um funcionário e custa <b>{brl(plano.valor_terminal)}/mês</b>. Os terminais pertencem às suas <b>empresas</b>. A <b>implantação</b> é um pagamento único de {brl(plano.valor_implantacao)}. Terminais não alocados a nenhuma empresa não são cobrados na mensalidade.
+          Seu plano é por <b>terminal de automação</b> — cada terminal equivale a 3 funcionários e custa <b>{brl(plano.valor_terminal)}/mês</b>. Os terminais pertencem às suas <b>empresas</b>. A <b>implantação</b> é um pagamento único de {brl(plano.valor_implantacao)}. Terminais não alocados a nenhuma empresa não são cobrados na mensalidade.
         </div>
       </Card>
 
@@ -134,7 +134,7 @@ export default function Planos({ onChange, showToast }: { tenant?: Tenant | null
       </div>
 
       {/* Histórico de Faturamento */}
-      <Card style={{ overflow: 'hidden' }}>
+      <Card className="r-scroll-x" style={{ overflow: 'hidden' }}>
         <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--c-border)', color: 'var(--c-ink3)', fontSize: 12, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase' }}>
           Histórico de Faturamento e Pagamentos
         </div>

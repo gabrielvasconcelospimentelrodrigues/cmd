@@ -144,7 +144,7 @@ export default function Landing() {
         <div style={{ maxWidth: 640, margin: '0 auto', textAlign: 'center' }}>
           <span style={eyebrow}>Preços</span>
           <h2 style={{ color: 'var(--c-ink)', fontSize: 36, fontWeight: 700, letterSpacing: '-.02em', margin: '10px 0 0' }}>Cobrança simples e justa.</h2>
-          <p style={{ color: 'var(--c-ink2)', fontSize: 17, marginTop: 10 }}><b>Implantação</b> (única) + <b>mensalidade por canal de automação</b>. Cada canal equivale a um funcionário. Cadastre 1 ou mais empresas.</p>
+          <p style={{ color: 'var(--c-ink2)', fontSize: 17, marginTop: 10 }}><b>Implantação</b> (única) + <b>mensalidade por canal de automação</b>. Cada canal equivale a 3 funcionários. Cadastre 1 ou mais empresas.</p>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 18, marginTop: 40, alignItems: 'start' }} className="lp-3">
           <Plano nome="1 canal" sub="Para uma empresa começando." preco="Sob consulta" onCta={() => setDemo(true)} cta="Falar com vendas" feats={['1 empresa · 1 canal de automação', 'Implantação + 1 mensalidade', 'Painel ao vivo e log completo']} />
