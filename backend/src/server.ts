@@ -23,9 +23,9 @@ import { closeQueues } from './lib/queue';
 async function buildServer() {
   const app = Fastify({
     logger: {
-      level: env.NODE_ENV === 'production' ? 'info' : 'debug',
+      level: (env.NODE_ENV === 'production' || process.env.VERCEL) ? 'info' : 'debug',
       transport:
-        env.NODE_ENV === 'development'
+        (env.NODE_ENV === 'development' && !process.env.VERCEL)
           ? { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss', ignore: 'pid,hostname' } }
           : undefined,
     },
