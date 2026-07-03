@@ -26,8 +26,8 @@ export function StatusPill({ tone, label }: { tone: Tone; label?: string }) {
   );
 }
 
-export function Card({ children, style, className }: { children: ReactNode; style?: React.CSSProperties; className?: string }) {
-  return <div className={className} style={{ background: 'var(--c-surface)', border: '1px solid var(--c-border)', borderRadius: 14, ...style }}>{children}</div>;
+export function Card({ children, style, className, onClick }: { children: ReactNode; style?: React.CSSProperties; className?: string; onClick?: () => void }) {
+  return <div className={className} style={{ background: 'var(--c-surface)', border: '1px solid var(--c-border)', borderRadius: 14, ...style }} onClick={onClick}>{children}</div>;
 }
 
 export function MetricCard({ label, value, delta, deltaColor, icon, iconBg }: { label: string; value: string; delta: string; deltaColor: string; icon: ReactNode; iconBg: string }) {
