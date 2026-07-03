@@ -203,6 +203,9 @@ body {
   padding: 48px;
   position: relative;
 }
+.lp-hide-lg {
+  display: none !important;
+}
 @media (max-width: 900px) {
   .ia-login-split {
     grid-template-columns: 1fr;
@@ -214,6 +217,10 @@ body {
     padding: 24px;
     justify-content: center;
   }
+  .lp-hide-lg {
+    display: flex !important;
+  }
 }
+
 
 

@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Moon, Sun } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { Shell, Field, PasswordField, useTheme, useToast, Toast } from '../components/iacmd/ui';
+import { Field, PasswordField, useTheme, useToast, Toast, LogoMark } from '../components/iacmd/ui';
+import { AgentSphere } from '../components/iacmd/AgentSphere';
 
-const center = { position: 'relative' as const, zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 20px 60px' };
 const emailRe = /.+@.+\..+/;
 
 export default function Login() {
