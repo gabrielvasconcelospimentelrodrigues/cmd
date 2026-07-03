@@ -3,7 +3,7 @@ import {
   LayoutDashboard, UploadCloud, Clock, Settings as SettingsIcon, Sun, Moon, LogOut,
   FileSpreadsheet, Eye, Trash2, Wallet, Users, CheckCircle2, Radio, X,
   Loader2, AlertTriangle, XCircle, FileText, Bug, ScrollText, Play, Pause, Square,
-  Cpu, Building2,
+  Cpu, Building2, Menu,
 } from 'lucide-react';
 import { useAuth } from '../../auth/AuthProvider';
 import { useTheme, LogoMark, useToast, Toast } from '../../components/iacmd/ui';
@@ -38,6 +38,8 @@ export default function Painel() {
   const [theme, toggleTheme] = useTheme();
   const [toast, showToast] = useToast();
   const [perfilAberto, setPerfilAberto] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [empresaSel, setEmpresaSel] = useState<string>(''); // seletor de empresa (demonstrativo)
   const [page, setPageInternal] = useState<Page>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('cmd_active_page') as Page;
@@ -87,14 +89,15 @@ export default function Painel() {
   const running = runningUploads.length > 0;
 
   return (
-    <div className="iacmd" data-theme={theme} style={{ display: 'grid', gridTemplateColumns: '244px 1fr', height: '100vh', overflow: 'hidden' }}>
+    <div className="iacmd ia-shell" data-theme={theme} data-menu={menuOpen ? 'open' : 'closed'} style={{ display: 'grid', gridTemplateColumns: '244px 1fr', height: '100vh', overflow: 'hidden' }}>
+      {menuOpen && <div className="ia-shell-backdrop" onClick={() => setMenuOpen(false)} />}
       <aside style={{ display: 'flex', flexDirection: 'column', background: 'var(--c-side)', borderRight: '1px solid var(--c-side-border)', overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '18px' }}><LogoMark size={34} /><span style={{ color: 'var(--c-side-ink)', fontWeight: 700, fontSize: 18 }}>IACMD</span></div>
         <nav style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 2 }}>
           {NAV.map(({ key, label, icon: Icon }) => {
             const active = page === key;
             return (
-              <button key={key} onClick={() => setPage(key)} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px', borderRadius: 10, border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', fontSize: 14, fontWeight: active ? 600 : 500, color: active ? 'var(--c-side-active-ink)' : 'var(--c-side-ink2)', background: active ? 'var(--c-side-active-bg)' : 'transparent' }}>
+              <button key={key} onClick={() => { setPage(key); setMenuOpen(false); }} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px', borderRadius: 10, border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', fontSize: 14, fontWeight: active ? 600 : 500, color: active ? 'var(--c-side-active-ink)' : 'var(--c-side-ink2)', background: active ? 'var(--c-side-active-bg)' : 'transparent' }}>
                 <Icon size={18} /><span style={{ flex: 1 }}>{label}</span>
                 {key === 'pendencias' && pendCount > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: 'var(--c-err)', minWidth: 18, height: 18, borderRadius: 999, display: 'grid', placeItems: 'center', padding: '0 5px' }}>{pendCount}</span>}
               </button>
@@ -121,12 +124,22 @@ export default function Painel() {
       </aside>
 
       <main style={{ minWidth: 0, overflowY: 'auto' }}>
-        <div style={{ position: 'sticky', top: 0, zIndex: 30, minHeight: 68, background: 'var(--c-surface)', borderBottom: '1px solid var(--c-border)', display: 'flex', alignItems: 'center', gap: 12, padding: '0 28px' }}>
-          <div>
-            <h1 style={{ color: 'var(--c-ink)', fontSize: 20, fontWeight: 700, letterSpacing: '-.01em', margin: 0 }}>{TITLE[page]}</h1>
-            <div style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{SUB[page]}</div>
+        <div style={{ position: 'sticky', top: 0, zIndex: 30, minHeight: 68, background: 'var(--c-surface)', borderBottom: '1px solid var(--c-border)', display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px' }}>
+          <button className="ia-hamburger" onClick={() => setMenuOpen(true)} title="Menu" style={{ width: 38, height: 38, flex: 'none', borderRadius: 10, border: '1px solid var(--c-border)', background: 'transparent', color: 'var(--c-ink)', cursor: 'pointer', placeItems: 'center' }}><Menu size={18} /></button>
+          <div style={{ minWidth: 0 }}>
+            <h1 style={{ color: 'var(--c-ink)', fontSize: 20, fontWeight: 700, letterSpacing: '-.01em', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{TITLE[page]}</h1>
+            <div style={{ color: 'var(--c-ink3)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{SUB[page]}</div>
           </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            {/* Seletor de empresa (demonstrativo por enquanto) — alinhado à direita */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--c-surface2)', border: '1px solid var(--c-border)', borderRadius: 10, padding: '0 4px 0 10px', height: 40, minWidth: 0, maxWidth: 240, flexShrink: 1 }}>
+              <Building2 size={16} style={{ color: 'var(--c-softfg)', flex: 'none' }} />
+              <select value={empresaSel} onChange={(e) => setEmpresaSel(e.target.value)} title="Empresa em foco" style={{ appearance: 'none', WebkitAppearance: 'none', border: 'none', background: 'transparent', color: 'var(--c-ink)', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', outline: 'none', padding: '0 24px 0 0', minWidth: 0, textOverflow: 'ellipsis', backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237A89A6' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E\")", backgroundRepeat: 'no-repeat', backgroundPosition: 'right center' }}>
+                <option value="">Todas as empresas</option>
+                {empresas.map((e) => <option key={e.id} value={String(e.id)}>{e.nome}</option>)}
+              </select>
+            </div>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 13px', borderRadius: 999, fontSize: 13, fontWeight: 600, color: running ? 'var(--c-okfg)' : 'var(--c-ink3)', background: running ? 'var(--c-oksoft)' : 'var(--c-surface2)', border: '1px solid var(--c-border)' }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: running ? 'var(--c-ok)' : 'var(--c-ink3)' }} />
               {running ? 'IA ativa' : 'IA ociosa'}
@@ -135,7 +148,7 @@ export default function Painel() {
             <button onClick={() => setPerfilAberto(true)} title="Perfil e segurança" style={{ width: 38, height: 38, borderRadius: '50%', border: 'none', background: 'linear-gradient(135deg,#2563EB,#38BDF8)', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'grid', placeItems: 'center' }}>{initials((session?.user?.user_metadata as { full_name?: string } | undefined)?.full_name || tenant?.name || 'U')}</button>
           </div>
         </div>
-        <div style={{ maxWidth: page === 'painel' && runningUploads.length > 0 ? '100%' : 1180, margin: '0 auto', padding: 28, animation: 'ia-slide .25s ease' }}>
+        <div className="ia-main-pad" style={{ maxWidth: page === 'painel' && runningUploads.length > 0 ? '100%' : 1180, margin: '0 auto', padding: 28, animation: 'ia-slide .25s ease' }}>
           {page === 'painel' && <Home tenant={tenant} uploads={uploads} patients={patients} empresas={empresas} onEnviar={() => setPage('enviar')} onChange={carregar} showToast={showToast} />}
           {page === 'enviar' && <Enviar empresas={empresas} uploads={uploads} onChange={carregar} showToast={showToast} />}
           {page === 'pendencias' && <Pendencias patients={patients} onChange={carregar} showToast={showToast} />}
@@ -208,7 +221,7 @@ function Home({ tenant, uploads, patients, empresas = [], onEnviar, onChange, sh
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       {runningUploads.length > 0 ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 18 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: 18 }}>
           {/* Agente */}
           <Card style={{ padding: 24, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', alignSelf: 'start', minHeight: 400 }}>
             <AgentSphere active={true} size={160} />
@@ -230,12 +243,12 @@ function Home({ tenant, uploads, patients, empresas = [], onEnviar, onChange, sh
           ))}
         </div>
       ) : (
-        <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+        <div className="r-agent-row" style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
           {/* Agente */}
-          <Card style={{ width: 340, flex: 'none', padding: 24, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', alignSelf: 'start' }}>
+          <Card className="r-agent-card" style={{ width: 340, flex: 'none', padding: 24, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', alignSelf: 'start' }}>
             <AgentSphere active={false} size={160} />
             <div style={{ color: 'var(--c-softfg)', fontSize: 12, fontWeight: 700, letterSpacing: '.1em', marginTop: 16 }}>IA CMD</div>
-            <div style={{ color: 'var(--c-ink)', fontSize: 20, fontWeight: 700, marginTop: 4 }}>Agente de IA ativo</div>
+            <div style={{ color: 'var(--c-ink)', fontSize: 20, fontWeight: 700, marginTop: 4 }}>Agente de IA inativo</div>
             <div style={{ color: 'var(--c-ink3)', fontSize: 13, marginTop: 4 }}>Cadastro automático no CMD-COLETA</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', marginTop: 20 }}>
               <button onClick={onEnviar} className="ia-btn-outline" style={{ width: '100%', justifyContent: 'center' }}><UploadCloud size={16} /> Enviar Fichas</button>
@@ -280,7 +293,7 @@ function Home({ tenant, uploads, patients, empresas = [], onEnviar, onChange, sh
       {/* Economia & Cadastros */}
       <Card style={{ padding: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}><Wallet size={18} style={{ color: 'var(--c-blue)' }} /><span style={{ color: 'var(--c-ink)', fontSize: 16, fontWeight: 700 }}>Economia & Cadastros</span></div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14 }}>
+        <div className="r-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14 }}>
           <Sub icon={<Wallet size={15} />} label="Economizado">
             <Row k="Esta semana" v={brl(ecoSemana.valor)} /><Row k="Total" v={brl(ecoTotal.valor)} accent />
           </Sub>
@@ -648,11 +661,11 @@ function VerEnvio({ upload, onClose }: { upload: Upload; onClose: () => void }) 
         <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
           {loading ? <div style={{ color: 'var(--c-ink3)', fontSize: 14 }}>Carregando…</div> : tab === 'relatorio' ? (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 12 }}>
+              <div className="r-grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 12 }}>
                 <Stat3 label="Pacientes" v={upload.patients_found} /><Stat3 label="Registrados" v={upload.patients_registered} c="var(--c-okfg)" /><Stat3 label="Erros" v={upload.patients_errored} c={upload.patients_errored ? 'var(--c-err)' : undefined} />
               </div>
               {upload.registro_iniciado_em && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 12, marginBottom: 16 }}>
+                <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 12, marginBottom: 16 }}>
                   <StatTxt label="Tempo total" v={tempoTotalStr(upload)} />
                   <StatTxt label="Tempo médio / paciente" v={tempoMedioStr(upload)} c="var(--c-softfg)" />
                 </div>
