@@ -5,7 +5,6 @@ import { supabase } from '../lib/supabase';
 import { LogoMark, Field, PasswordField, useTheme, useToast, Toast } from '../components/iacmd/ui';
 import { AgentSphere } from '../components/iacmd/AgentSphere';
 
-const center = { position: 'relative' as const, zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '30px 20px 60px' };
 const emailRe = /.+@.+\..+/;
 
 export default function Register() {

@@ -737,14 +737,14 @@ function FichasModal({ upload, onClose, onChange, showToast }: { upload: Upload;
         </div>
 
         {/* Lista */}
-        <div style={{ overflowY: 'auto', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--c-ink3)' }}>Carregando fichas…</div>
-          : filtradas.length === 0 ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--c-ink3)' }}>Nenhuma ficha.</div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {loading ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--c-ink3)', flex: 'none' }}>Carregando fichas…</div>
+          : filtradas.length === 0 ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--c-ink3)', flex: 'none' }}>Nenhuma ficha.</div>
           : filtradas.map((f) => {
             const aberto = editId === f.id;
             const t = fichaTone(f.status); const tc = t === 'ok' ? 'var(--c-okfg)' : t === 'proc' ? 'var(--c-softfg)' : 'var(--c-warnfg)'; const tbg = t === 'ok' ? 'var(--c-oksoft)' : t === 'proc' ? 'var(--c-soft)' : 'var(--c-warnsoft)';
             return (
-            <div key={f.id} style={{ border: `1px solid ${aberto ? 'var(--c-blue)' : 'var(--c-border)'}`, borderRadius: 12, overflow: 'hidden', background: aberto ? 'var(--c-surface2)' : 'transparent' }}>
+            <div key={f.id} style={{ flex: 'none', border: `1px solid ${aberto ? 'var(--c-blue)' : 'var(--c-border)'}`, borderRadius: 12, overflow: 'hidden', background: aberto ? 'var(--c-surface2)' : 'transparent' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 16px' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: 'var(--c-ink)', fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.nome || '—'}</div>
