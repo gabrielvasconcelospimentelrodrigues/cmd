@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode, type CSSProperties } from 'react';
 import {
   LayoutDashboard, ShieldCheck, Building2, Users, CreditCard, ScrollText, SlidersHorizontal,
-  LogOut, Sun, Moon, Check, X, Shield, Cpu, Wallet, Loader2, MoreVertical, KeyRound, Pencil, Ban, Trash2, UserPlus, Copy,
+  LogOut, Sun, Moon, Check, X, Shield, Cpu, Wallet, Loader2, MoreVertical, KeyRound, Pencil, Ban, Trash2, UserPlus, Copy, Menu,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { useTheme, LogoMark, useToast, Toast, PasswordField, type ToastData } from '../components/iacmd/ui';
@@ -51,6 +51,7 @@ export default function SuperAdmin() {
   const [terminalRequests, setTerminalRequests] = useState<TerminalRequest[]>([]);
   const [confirm, setConfirm] = useState<{ t: T; tipo: 'approve' | 'suspend' } | null>(null);
   const [perfilAberto, setPerfilAberto] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const carregar = useCallback(async () => {
     const [t, u, s, tr] = await Promise.all([
@@ -97,19 +98,20 @@ export default function SuperAdmin() {
   const [title, sub] = TITLES[page];
 
   return (
-    <div className="iacmd" data-theme={theme} style={{ display: 'grid', gridTemplateColumns: '248px 1fr', height: '100vh', overflow: 'hidden' }}>
+    <div className="iacmd ia-shell" data-theme={theme} data-menu={menuOpen ? 'open' : 'closed'} style={{ display: 'grid', gridTemplateColumns: '248px 1fr', height: '100vh', overflow: 'hidden' }}>
+      {menuOpen && <div className="ia-shell-backdrop" onClick={() => setMenuOpen(false)} />}
       {/* sidebar */}
       <aside style={{ display: 'flex', flexDirection: 'column', background: 'var(--c-side)', borderRight: '1px solid var(--c-side-border)', overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '18px 20px' }}>
           <LogoMark size={34} />
-          <div><div style={{ color: 'var(--c-side-ink)', fontWeight: 700, fontSize: 18 }}>IACMD</div><div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--c-warnfg)', fontSize: 10, fontWeight: 700, letterSpacing: '.08em' }}><Shield size={11} /> SUPER ADMIN</div></div>
+          <div><div style={{ color: 'var(--c-side-ink)', fontWeight: 700, fontSize: 18 }}>IA-CMD</div><div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--c-warnfg)', fontSize: 10, fontWeight: 700, letterSpacing: '.08em' }}><Shield size={11} /> SUPER ADMIN</div></div>
         </div>
         <nav style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 2 }}>
           {NAV.map(({ key, label, icon: Icon }) => {
             const pendingTerminalsCount = terminalRequests.filter(r => r.status === 'pending').length;
             const active = page === key;
             return (
-              <button key={key} onClick={() => setPage(key)} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px', borderRadius: 10, border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', fontSize: 14, fontWeight: active ? 600 : 500, color: active ? 'var(--c-side-active-ink)' : 'var(--c-side-ink2)', background: active ? 'var(--c-side-active-bg)' : 'transparent' }}>
+              <button key={key} onClick={() => { setPage(key); setMenuOpen(false); }} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px', borderRadius: 10, border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', fontSize: 14, fontWeight: active ? 600 : 500, color: active ? 'var(--c-side-active-ink)' : 'var(--c-side-ink2)', background: active ? 'var(--c-side-active-bg)' : 'transparent' }}>
                 <Icon size={18} /><span style={{ flex: 1 }}>{label}</span>
                 {key === 'auth' && (pend.length + pendingTerminalsCount) > 0 && <span style={{ background: 'var(--c-warn)', color: '#3A2A00', fontSize: 11, fontWeight: 700, padding: '1px 7px', borderRadius: 999 }}>{pend.length + pendingTerminalsCount}</span>}
               </button>
@@ -127,15 +129,16 @@ export default function SuperAdmin() {
 
       {/* main */}
       <main style={{ minWidth: 0, overflowY: 'auto' }}>
-        <div style={{ position: 'sticky', top: 0, zIndex: 30, height: 64, background: 'var(--c-surface)', borderBottom: '1px solid var(--c-border)', display: 'flex', alignItems: 'center', gap: 16, padding: '0 24px' }}>
-          <div><h1 style={{ color: 'var(--c-ink)', fontSize: 19, fontWeight: 700, margin: 0 }}>{title}</h1><div style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{sub}</div></div>
+        <div style={{ position: 'sticky', top: 0, zIndex: 30, minHeight: 64, background: 'var(--c-surface)', borderBottom: '1px solid var(--c-border)', display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px' }}>
+          <button className="ia-hamburger" onClick={() => setMenuOpen(true)} title="Menu" style={{ width: 38, height: 38, flex: 'none', borderRadius: 10, border: '1px solid var(--c-border)', background: 'transparent', color: 'var(--c-ink)', cursor: 'pointer', placeItems: 'center' }}><Menu size={18} /></button>
+          <div style={{ minWidth: 0 }}><h1 style={{ color: 'var(--c-ink)', fontSize: 19, fontWeight: 700, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</h1><div style={{ color: 'var(--c-ink3)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div></div>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'var(--c-oksoft)', color: 'var(--c-okfg)', fontSize: 13, fontWeight: 600, padding: '8px 13px', borderRadius: 10, border: '1px solid var(--c-border)' }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--c-ok)' }} /> Sistema operacional</span>
+            <span className="lp-hide-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'var(--c-oksoft)', color: 'var(--c-okfg)', fontSize: 13, fontWeight: 600, padding: '8px 13px', borderRadius: 10, border: '1px solid var(--c-border)' }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--c-ok)' }} /> Sistema operacional</span>
             <button onClick={toggle} title="Tema" style={iconBtn}>{theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}</button>
           </div>
         </div>
 
-        <div style={{ maxWidth: 1200, margin: '0 auto', padding: 24, animation: 'ia-slide .25s ease' }}>
+        <div className="ia-main-pad" style={{ maxWidth: 1200, margin: '0 auto', padding: 24, animation: 'ia-slide .25s ease' }}>
           {page === 'overview' && <Overview stats={stats} pend={pend} onGo={setPage} onApprove={(t) => setConfirm({ t, tipo: 'approve' })} />}
           {page === 'auth' && (
             <Auth
@@ -177,7 +180,7 @@ export default function SuperAdmin() {
 }
 const iconBtn: React.CSSProperties = { width: 38, height: 38, borderRadius: 10, border: '1px solid var(--c-border)', background: 'transparent', color: 'var(--c-ink)', cursor: 'pointer', display: 'grid', placeItems: 'center' };
 
-function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) { return <div style={{ background: 'var(--c-surface)', border: '1px solid var(--c-border)', borderRadius: 14, ...style }}>{children}</div>; }
+function Card({ children, style, className }: { children: React.ReactNode; style?: React.CSSProperties; className?: string }) { return <div className={className} style={{ background: 'var(--c-surface)', border: '1px solid var(--c-border)', borderRadius: 14, ...style }}>{children}</div>; }
 
 /* ---- Mapa do Brasil (tile grid dos 27 estados) ------------------------- */
 // [linha, coluna] aproximando a geografia do país (norte em cima, leste à direita).
@@ -241,7 +244,7 @@ function Overview({ stats, pend, onGo, onApprove }: { stats: Stats | null; pend:
   ];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 16 }}>
+      <div className="r-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 16 }}>
         {cards.map((c) => (
           <Card key={c.label} style={{ padding: 18 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ width: 36, height: 36, borderRadius: 10, background: c.icBg, color: c.icFg, display: 'grid', placeItems: 'center' }}>{c.icon}</span><span style={{ color: 'var(--c-ink3)', fontSize: 12, fontWeight: 600 }}>{c.delta}</span></div>
@@ -299,7 +302,7 @@ function MapaBrasilSection({ onGo }: { onGo: (p: Page) => void }) {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 0 }}>
+      <div className="r-split" style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 0 }}>
         {/* Mapa com zoom */}
         <div style={{ position: 'relative', padding: 20, overflow: 'auto', maxHeight: 520, borderRight: '1px solid var(--c-border)' }}>
           <div style={{ transform: `scale(${zoom})`, transformOrigin: 'top center', transition: 'transform .15s', width: 'fit-content', margin: '0 auto' }}>
@@ -310,7 +313,7 @@ function MapaBrasilSection({ onGo }: { onGo: (p: Page) => void }) {
 
         {/* Painel lateral: resumo + detalhe do estado sob o mouse + ranking */}
         <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14, maxHeight: 520, overflowY: 'auto' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <MiniStat label="Ativos" value={String(d?.resumo.ativos ?? 0)} tone="ok" />
             <MiniStat label="Inativos" value={String(d?.resumo.inativos ?? 0)} tone="warn" />
             <MiniStat label="Estados atendidos" value={String(d?.resumo.estados_com_uso ?? 0)} tone="accent" />
@@ -480,7 +483,7 @@ function Empresas({ tenants, showToast, onReload, onAction, onVerPlano }: { tena
         </div>
       </Card>
 
-      <Card style={{ overflow: 'hidden' }}>
+      <Card className="r-scroll-x" style={{ overflow: 'hidden' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr .9fr 120px 150px', gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)', fontSize: 12, fontWeight: 600, color: 'var(--c-ink3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
           <span>Empresa</span><span>Responsável</span><span>Cidade</span><span>Status</span><span style={{ textAlign: 'right' }}>Ações</span>
         </div>
@@ -618,14 +621,14 @@ function DossieGeral({ d, onVerPlano, onSaved, showToast }: { d: Dossie; onVerPl
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10 }}>
+      <div className="r-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10 }}>
         <Kpi label="Cadastros feitos" value={String(r.cadastrados)} tone="ok" sub={`${r.envios_total} envio(s)`} />
         <Kpi label="Taxa de acerto" value={`${r.taxa_pct}%`} tone={r.taxa_pct >= 95 ? 'ok' : 'warn'} sub={`${r.erros} erro(s)`} />
         <Kpi label="Terminais conectados" value={String(r.terminais_conectados)} tone="accent" sub={`${d.plano?.total_terminais ?? 0} contratado(s)`} />
         <Kpi label="Tempo em automação" value={duracao(r.tempo_ativo_segundos)} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <Card style={{ padding: 16 }}>
           <div style={{ color: 'var(--c-ink3)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 10 }}>Dados</div>
           <InfoLinha k="Responsável" v={t.responsavel || '—'} />
@@ -811,7 +814,7 @@ function Usuarios({ users, showToast, onReload, meId }: { users: U[]; showToast:
         </div>
       </Card>
 
-      <Card style={{ overflow: 'visible' }}>
+      <Card className="r-scroll-x" style={{ overflow: 'visible' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.1fr 120px 120px 46px', gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)', fontSize: 12, fontWeight: 600, color: 'var(--c-ink3)', textTransform: 'uppercase', letterSpacing: '.04em', borderRadius: '14px 14px 0 0' }}>
           <span>Usuário</span><span>Empresa</span><span>Papel</span><span>Status</span><span />
         </div>
@@ -1002,7 +1005,7 @@ function EqCell({ label, value, tone, big }: { label: string; value: string; ton
   );
 }
 function Op({ children }: { children: ReactNode }) {
-  return <div style={{ color: 'var(--c-ink3)', fontSize: 22, fontWeight: 400, textAlign: 'center', padding: '0 4px' }}>{children}</div>;
+  return <div data-op style={{ color: 'var(--c-ink3)', fontSize: 22, fontWeight: 400, textAlign: 'center', padding: '0 4px' }}>{children}</div>;
 }
 
 const MESES_PT = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
@@ -1073,7 +1076,7 @@ function Financeiro({ showToast, onVerPlano }: { showToast: (t: { title: string;
             {r.margem_pct}% de margem
           </span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr auto 1.4fr', alignItems: 'center', padding: '20px 24px', gap: 4 }}>
+        <div className="r-eq" style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr auto 1.4fr', alignItems: 'center', padding: '20px 24px', gap: 4 }}>
           <EqCell label="Entradas (recebido)" value={brl(r.entradas_mes)} tone="ok" />
           <Op>−</Op>
           <EqCell label="Custos de operação" value={brl(r.custos_mes)} tone="warn" />
@@ -1087,7 +1090,7 @@ function Financeiro({ showToast, onVerPlano }: { showToast: (t: { title: string;
       {/* 2. RECEITA */}
       <div>
         <SectionTitle>Receita</SectionTitle>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginTop: 10 }}>
+        <div className="r-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginTop: 10 }}>
           <Kpi label="Receita recorrente (MRR)" value={brl(r.mrr)} tone="accent" sub="mensalidade contratada" />
           <Kpi label="Faturado no mês" value={brl(r.faturado_mes)} sub={`competência ${refMes.split('-').reverse().join('/')}`} />
           <Kpi label="Recebido no mês" value={brl(r.recebido_mes)} tone="ok" />
@@ -1098,7 +1101,7 @@ function Financeiro({ showToast, onVerPlano }: { showToast: (t: { title: string;
       {/* 3. COBRANÇA & RISCO */}
       <div>
         <SectionTitle>Cobrança &amp; risco</SectionTitle>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginTop: 10 }}>
+        <div className="r-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginTop: 10 }}>
           <Kpi label="A receber (em aberto)" value={brl(r.em_aberto)} tone={r.em_aberto > 0 ? 'warn' : undefined} />
           <Kpi label="Vencido" value={brl(r.vencido)} tone={r.vencido > 0 ? 'err' : undefined} />
           <Kpi label="Implantações pendentes" value={brl(r.implantacoes_pendentes)} tone={r.implantacoes_pendentes > 0 ? 'warn' : undefined} />
@@ -1127,7 +1130,7 @@ function Financeiro({ showToast, onVerPlano }: { showToast: (t: { title: string;
       {/* 4. CUSTOS DE OPERAÇÃO */}
       <div>
         <SectionTitle right={<span style={{ color: 'var(--c-ink3)', fontSize: 12 }}>fixos {brl(r.custos_recorrentes)}/mês</span>}>Custos de operação · {refMes.split('-').reverse().join('/')}</SectionTitle>
-        <Card style={{ overflow: 'hidden', marginTop: 10 }}>
+        <Card className="r-scroll-x" style={{ overflow: 'hidden', marginTop: 10 }}>
           <LancForm onAdd={addLanc} busy={addBusy} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 150px 120px 90px', padding: '9px 20px', borderTop: '1px solid var(--c-border)', background: 'var(--c-surface2)', fontSize: 11, fontWeight: 700, color: 'var(--c-ink3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
             <span>Descrição</span><span>Categoria</span><span style={{ textAlign: 'right' }}>Valor</span><span />
@@ -1159,7 +1162,7 @@ function Financeiro({ showToast, onVerPlano }: { showToast: (t: { title: string;
             ))}
           </div>
         }>Faturas emitidas</SectionTitle>
-        <Card style={{ overflow: 'hidden', marginTop: 10 }}>
+        <Card className="r-scroll-x" style={{ overflow: 'hidden', marginTop: 10 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 96px 84px 96px', padding: '9px 20px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)', fontSize: 11, fontWeight: 700, color: 'var(--c-ink3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
             <span>Assinante / fatura</span><span style={{ textAlign: 'right' }}>Valor</span><span style={{ textAlign: 'center' }}>Status</span><span />
           </div>
@@ -1247,6 +1250,16 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
     catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); }
   };
 
+  const revogarTerminal = async (empresaId: number) => {
+    if (!window.confirm('Revogar 1 terminal desta empresa? A cota diminui e a mensalidade reduz no próximo ciclo.')) return;
+    setBusy(empresaId);
+    try {
+      await apiPost(`/admin/empresas/${empresaId}/revogar-terminal`, {});
+      if (sel) await abrir(sel);
+      showToast({ title: 'Terminal revogado', msg: '', kind: 'ok' });
+    } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); } finally { setBusy(null); }
+  };
+
   const baixa = async (f: Fatura, pago: boolean) => {
     setBusy(f.id);
     try {
@@ -1267,7 +1280,7 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 16, alignItems: 'start' }}>
+    <div className="r-cols-side" style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 16, alignItems: 'start' }}>
       <Card style={{ padding: 8 }}>
         <div style={{ color: 'var(--c-ink3)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', padding: '8px 10px' }}>Assinantes</div>
         {tenants.length === 0 ? <div style={{ padding: 14, color: 'var(--c-ink3)', fontSize: 13 }}>Nenhum.</div> : tenants.map((t) => (
@@ -1282,7 +1295,7 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
           <Card style={{ padding: 30, color: 'var(--c-ink3)', fontSize: 14 }}>Carregando…</Card>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
+            <div className="r-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
               <Mini label="Mensalidade total" v={brl(plano.mensal)} c="var(--c-softfg)" />
               <Mini label="Terminais alocados" v={String(plano.total_terminais)} />
               <Mini label="Não alocados" v={String(plano.nao_alocados || 0)} c={plano.nao_alocados > 0 ? 'var(--c-warnfg)' : undefined} />
@@ -1291,7 +1304,7 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
 
             <Card style={{ padding: 20 }}>
               <div style={{ color: 'var(--c-ink)', fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Valores do assinante</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <div>
                   <label className="ia-label">Mensalidade por terminal (R$)</label>
                   <div style={{ display: 'flex', gap: 8 }}>
@@ -1343,7 +1356,7 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
             <Card style={{ overflow: 'hidden' }}>
               <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--c-border)', color: 'var(--c-ink3)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em' }}>Empresas ({plano.empresas.length})</div>
               {plano.empresas.map((e) => (
-                <EmpresaLinha key={e.id} e={e} />
+                <EmpresaLinha key={e.id} e={e} onRevogar={revogarTerminal} busy={busy === e.id} />
               ))}
             </Card>
           </div>
@@ -1353,17 +1366,25 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
   );
 }
 
-function EmpresaLinha({ e }: { e: Plano['empresas'][number] }) {
+function EmpresaLinha({ e, onRevogar, busy }: { e: Plano['empresas'][number]; onRevogar: (empresaId: number) => void; busy: boolean }) {
+  const configurados = (e as { configurados?: number }).configurados ?? 0;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', borderBottom: '1px solid var(--c-border)' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 600 }}>{e.nome}</div>
-        <div style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{e.cnpj || 'sem CNPJ'}</div>
+        <div style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{e.cnpj || 'sem CNPJ'}{configurados > 0 ? ` · ${configurados} conectado(s)` : ''}</div>
       </div>
       <div style={{ textAlign: 'right' }}>
         <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 600 }}>{e.terminais} terminal(is)</div>
         <div style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{brl(e.mensal)}/mês</div>
       </div>
+      <button
+        onClick={() => onRevogar(e.id)}
+        disabled={busy || e.terminais <= 0}
+        title={e.terminais <= 0 ? 'Sem terminais para revogar' : 'Revogar 1 terminal'}
+        className="ia-btn-outline"
+        style={{ padding: '0 12px', height: 34, fontSize: 13, flex: 'none', color: e.terminais > 0 ? 'var(--c-errfg)' : 'var(--c-ink3)' }}
+      >{busy ? '…' : 'Revogar terminal'}</button>
     </div>
   );
 }
@@ -1579,7 +1600,7 @@ function Regras() {
         </span>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 14 }}>
+      <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 14 }}>
         {d.grupos.map((g) => (
           <Card key={g.titulo} style={{ overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '13px 18px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)' }}>

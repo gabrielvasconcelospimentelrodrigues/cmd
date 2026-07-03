@@ -9,9 +9,9 @@ import { useAuth } from '../../auth/AuthProvider';
 import { useTheme, LogoMark, useToast, Toast } from '../../components/iacmd/ui';
 import ProfileSecurity from '../../components/iacmd/ProfileSecurity';
 import { AgentSphere } from '../../components/iacmd/AgentSphere';
-import { apiGet, apiPost, apiUpload, apiDelete } from '../../lib/api';
+import { apiGet, apiPost, apiUpload, apiDelete, apiPatch } from '../../lib/api';
 import type { Upload, Ficha, ClinicAccount, Me, LogEntry, EconomiaResp } from '../../lib/types';
-import { StatusPill, Card, ProgressBar, fmtMilhar, brl, economia, fichaTone } from './parts';
+import { StatusPill, Card, ProgressBar, fmtMilhar, brl, economia, fichaTone, toneLabel } from './parts';
 import Pendencias from './Pendencias';
 import Config from './Config';
 import Planos from './Planos';
@@ -92,7 +92,7 @@ export default function Painel() {
     <div className="iacmd ia-shell" data-theme={theme} data-menu={menuOpen ? 'open' : 'closed'} style={{ display: 'grid', gridTemplateColumns: '244px 1fr', height: '100vh', overflow: 'hidden' }}>
       {menuOpen && <div className="ia-shell-backdrop" onClick={() => setMenuOpen(false)} />}
       <aside style={{ display: 'flex', flexDirection: 'column', background: 'var(--c-side)', borderRight: '1px solid var(--c-side-border)', overflow: 'hidden' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '18px' }}><LogoMark size={34} /><span style={{ color: 'var(--c-side-ink)', fontWeight: 700, fontSize: 18 }}>IACMD</span></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '18px' }}><LogoMark size={34} /><span style={{ color: 'var(--c-side-ink)', fontWeight: 700, fontSize: 18 }}>IA-CMD</span></div>
         <nav style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 2 }}>
           {NAV.map(({ key, label, icon: Icon }) => {
             const active = page === key;
@@ -225,7 +225,7 @@ function Home({ tenant, uploads, patients, empresas = [], onEnviar, onChange, sh
           {/* Agente */}
           <Card style={{ padding: 24, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', alignSelf: 'start', minHeight: 400 }}>
             <AgentSphere active={true} size={160} />
-            <div style={{ color: 'var(--c-softfg)', fontSize: 12, fontWeight: 700, letterSpacing: '.1em', marginTop: 16 }}>IA CMD</div>
+            <div style={{ color: 'var(--c-softfg)', fontSize: 12, fontWeight: 700, letterSpacing: '.1em', marginTop: 16 }}>IA-CMD</div>
             <div style={{ color: 'var(--c-ink)', fontSize: 20, fontWeight: 700, marginTop: 4 }}>Agente de IA em andamento</div>
             <div style={{ color: 'var(--c-ink3)', fontSize: 13, marginTop: 4 }}>Cadastro automático no CMD-COLETA</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', marginTop: 20 }}>
@@ -247,7 +247,7 @@ function Home({ tenant, uploads, patients, empresas = [], onEnviar, onChange, sh
           {/* Agente */}
           <Card className="r-agent-card" style={{ width: 340, flex: 'none', padding: 24, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', alignSelf: 'start' }}>
             <AgentSphere active={false} size={160} />
-            <div style={{ color: 'var(--c-softfg)', fontSize: 12, fontWeight: 700, letterSpacing: '.1em', marginTop: 16 }}>IA CMD</div>
+            <div style={{ color: 'var(--c-softfg)', fontSize: 12, fontWeight: 700, letterSpacing: '.1em', marginTop: 16 }}>IA-CMD</div>
             <div style={{ color: 'var(--c-ink)', fontSize: 20, fontWeight: 700, marginTop: 4 }}>Agente de IA inativo</div>
             <div style={{ color: 'var(--c-ink3)', fontSize: 13, marginTop: 4 }}>Cadastro automático no CMD-COLETA</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', marginTop: 20 }}>
@@ -442,6 +442,7 @@ function EnviosRecentes({ empresas = [], uploads, onChange, showToast, simple, o
   const [live, setLive] = useState<Upload | null>(null);
   const [pararAlvo, setPararAlvo] = useState<Upload | null>(null);
   const [selectTerminalForUpload, setSelectTerminalForUpload] = useState<Upload | null>(null);
+  const [editarFichas, setEditarFichas] = useState<Upload | null>(null);
 
   const excluir = async (u: Upload) => {
     if (!confirm(`Excluir o envio "${u.name || u.original_filename}"?`)) return;
@@ -465,7 +466,7 @@ function EnviosRecentes({ empresas = [], uploads, onChange, showToast, simple, o
     }
   };
 
-  const controle = async (u: Upload, acao: 'iniciar' | 'pausar' | 'parar') => {
+  const controle = async (u: Upload, acao: 'iniciar' | 'retomar' | 'pausar' | 'parar') => {
     if (acao === 'iniciar') {
       cliqueIniciar(u);
       return;
@@ -504,9 +505,15 @@ function EnviosRecentes({ empresas = [], uploads, onChange, showToast, simple, o
                 <button onClick={() => controle(u, 'pausar')} title="Pausar" style={{ ...actBtn, color: 'var(--c-warn)' }}><Pause size={15} /></button>
                 <button onClick={() => setPararAlvo(u)} title="Parar" style={{ ...actBtn, color: 'var(--c-err)' }}><Square size={14} /></button>
               </>
+            ) : u.status === 'paused' ? (
+              <>
+                <button onClick={() => controle(u, 'retomar')} title="Retomar automação" style={{ ...actBtn, color: 'var(--c-ok)' }}><Play size={15} /></button>
+                <button onClick={() => setPararAlvo(u)} title="Parar" style={{ ...actBtn, color: 'var(--c-err)' }}><Square size={14} /></button>
+              </>
             ) : temPendentes(u) ? (
               <button onClick={() => cliqueIniciar(u)} title="Iniciar automação" style={{ ...actBtn, color: 'var(--c-ok)' }}><Play size={15} /></button>
             ) : null}
+            <button onClick={() => setEditarFichas(u)} title="Ver / editar fichas" style={actBtn}><FileText size={16} /></button>
             <button onClick={() => setVer(u)} title="Ver detalhes" style={actBtn}><Eye size={16} /></button>
             <button onClick={() => excluir(u)} title="Excluir" style={{ ...actBtn, color: 'var(--c-err)' }}><Trash2 size={16} /></button>
           </span>
@@ -514,6 +521,7 @@ function EnviosRecentes({ empresas = [], uploads, onChange, showToast, simple, o
         );
       })}
       {ver && <VerEnvio upload={ver} onClose={() => setVer(null)} />}
+      {editarFichas && <FichasModal upload={editarFichas} onClose={() => setEditarFichas(null)} onChange={onChange} showToast={showToast} />}
       {live && <RoboAoVivoModal upload={live} onClose={() => setLive(null)} />}
       {pararAlvo && (
         <div onClick={() => setPararAlvo(null)} style={{ position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(7,11,22,.62)', backdropFilter: 'blur(3px)', display: 'grid', placeItems: 'center', padding: 20 }}>
@@ -625,6 +633,145 @@ function solucao(status: string, motivo: string): string {
   if (/profissional|médico|medico|não encontrad/.test(m)) return 'Profissional não localizado no CMD-COLETA. Confira o nome do médico na ficha.';
   if (/login|2fa|sessão|sessao|autentic/.test(m)) return 'Falha de login/2FA. Verifique as credenciais e a chave 2FA em Configurações.';
   return 'Reenvie pela aba Pendências. Se o erro persistir, fale com o suporte.';
+}
+
+/* ============ MODAL: VER / EDITAR FICHAS DE UM ENVIO ============ */
+type FichaEdit = Ficha & { data_nascimento?: string | null };
+const CAMPOS_FICHA: { k: keyof FichaEdit; label: string; type?: string }[] = [
+  { k: 'nome', label: 'Nome' },
+  { k: 'cns', label: 'CNS' },
+  { k: 'data_atendimento', label: 'Data atendimento', type: 'date' },
+  { k: 'data_nascimento', label: 'Nascimento', type: 'date' },
+  { k: 'cid10_codigo', label: 'CID-10' },
+  { k: 'medico_nome', label: 'Médico' },
+];
+
+function FichasModal({ upload, onClose, onChange, showToast }: { upload: Upload; onClose: () => void; onChange: () => Promise<void>; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void }) {
+  const [fichas, setFichas] = useState<FichaEdit[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busca, setBusca] = useState('');
+  const [editId, setEditId] = useState<number | null>(null);
+  const [form, setForm] = useState<Partial<FichaEdit>>({});
+  const [salvando, setSalvando] = useState(false);
+  const [bulk, setBulk] = useState(false);
+  const [bulkForm, setBulkForm] = useState<Partial<FichaEdit>>({});
+
+  const carregar = useCallback(async () => {
+    setLoading(true);
+    try { setFichas(await apiGet<FichaEdit[]>(`/uploads/${upload.id}/patients`)); }
+    catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); }
+    finally { setLoading(false); }
+    // showToast é estável o suficiente; não entra nas deps para não recriar
+    // o carregar a cada render do painel (o que causava o modal piscando).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [upload.id]);
+  // Carrega uma vez quando o modal abre para este envio.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void carregar(); }, [upload.id]);
+
+  const abrirEdicao = (f: FichaEdit) => {
+    setEditId(f.id);
+    setForm({ nome: f.nome, cns: f.cns, data_atendimento: f.data_atendimento, data_nascimento: f.data_nascimento ?? null, cid10_codigo: f.cid10_codigo, medico_nome: f.medico_nome });
+  };
+  const salvarUma = async () => {
+    if (editId == null) return;
+    setSalvando(true);
+    try {
+      await apiPatch(`/patients/${editId}`, form);
+      await carregar(); await onChange();
+      setEditId(null);
+      showToast({ title: 'Ficha atualizada', msg: '', kind: 'ok' });
+    } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); } finally { setSalvando(false); }
+  };
+  const aplicarTodas = async () => {
+    const campos = Object.fromEntries(Object.entries(bulkForm).filter(([, v]) => v !== undefined && v !== ''));
+    if (Object.keys(campos).length === 0) return showToast({ title: 'Nada preenchido', msg: 'Preencha ao menos um campo para aplicar a todas.', kind: 'err' });
+    if (!window.confirm(`Aplicar esses campos a TODAS as ${fichas.length} fichas deste envio?`)) return;
+    setSalvando(true);
+    try {
+      const r = await apiPatch<{ atualizadas: number }>(`/uploads/${upload.id}/patients`, campos);
+      await carregar(); await onChange();
+      setBulk(false); setBulkForm({});
+      showToast({ title: `${r.atualizadas} ficha(s) atualizada(s)`, msg: '', kind: 'ok' });
+    } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); } finally { setSalvando(false); }
+  };
+
+  const filtradas = fichas.filter((f) => !busca.trim() || `${f.nome} ${f.cns} ${f.cid10_codigo} ${f.medico_nome}`.toLowerCase().includes(busca.trim().toLowerCase()));
+  const inp: React.CSSProperties = { boxSizing: 'border-box', width: '100%', height: 36, background: 'var(--c-input)', border: '1.5px solid var(--c-border2)', borderRadius: 8, padding: '0 10px', color: 'var(--c-ink)', fontFamily: 'inherit', fontSize: 13, outline: 'none' };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(7,11,22,.62)', backdropFilter: 'blur(3px)', display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 860, maxWidth: '100%', maxHeight: '92vh', display: 'flex', flexDirection: 'column', background: 'var(--c-surface)', border: '1px solid var(--c-border)', borderRadius: 18, boxShadow: 'var(--c-shadow)', overflow: 'hidden' }}>
+        {/* Cabeçalho */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 22px', borderBottom: '1px solid var(--c-border)' }}>
+          <FileText size={20} style={{ color: 'var(--c-softfg)', flex: 'none' }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ color: 'var(--c-ink)', fontSize: 16, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{upload.name || upload.original_filename}</div>
+            <div style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{fichas.length} ficha(s)</div>
+          </div>
+          <button onClick={() => { setBulk((b) => !b); setEditId(null); }} className="ia-btn-outline" style={{ height: 36, padding: '0 12px', fontSize: 13, color: bulk ? 'var(--c-softfg)' : undefined }}>{bulk ? 'Cancelar' : 'Editar todas'}</button>
+          <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: 9, border: '1px solid var(--c-border)', background: 'transparent', color: 'var(--c-ink3)', cursor: 'pointer', display: 'grid', placeItems: 'center', flex: 'none' }}><X size={18} /></button>
+        </div>
+
+        {/* Barra de edição em massa */}
+        {bulk && (
+          <div style={{ padding: '14px 22px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)' }}>
+            <div style={{ color: 'var(--c-ink2)', fontSize: 13, marginBottom: 10 }}>Preencha só os campos que quer aplicar a <b>todas</b> as fichas (os vazios são ignorados):</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+              {CAMPOS_FICHA.map((c) => (
+                <div key={String(c.k)}>
+                  <label style={{ color: 'var(--c-ink3)', fontSize: 11, display: 'block', marginBottom: 3 }}>{c.label}</label>
+                  <input type={c.type ?? 'text'} value={(bulkForm[c.k] as string) ?? ''} onChange={(e) => setBulkForm({ ...bulkForm, [c.k]: e.target.value })} style={inp} />
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+              <button onClick={aplicarTodas} disabled={salvando} className="ia-btn" style={{ padding: '9px 16px' }}>{salvando ? 'Aplicando…' : `Aplicar a todas (${fichas.length})`}</button>
+            </div>
+          </div>
+        )}
+
+        {/* Busca */}
+        <div style={{ padding: '10px 22px', borderBottom: '1px solid var(--c-border)' }}>
+          <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome, CNS, CID, médico…" style={{ ...inp, height: 38 }} />
+        </div>
+
+        {/* Lista */}
+        <div style={{ overflowY: 'auto', padding: '0 8px' }}>
+          {loading ? <div style={{ padding: 30, textAlign: 'center', color: 'var(--c-ink3)' }}>Carregando fichas…</div>
+          : filtradas.length === 0 ? <div style={{ padding: 30, textAlign: 'center', color: 'var(--c-ink3)' }}>Nenhuma ficha.</div>
+          : filtradas.map((f) => (
+            <div key={f.id} style={{ borderBottom: '1px solid var(--c-border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.nome || '—'}</div>
+                  <div className="ia-mono" style={{ color: 'var(--c-ink3)', fontSize: 12 }}>CNS {f.cns || '—'} · CID {f.cid10_codigo || '—'} · {f.data_atendimento ? f.data_atendimento.slice(0, 10).split('-').reverse().join('/') : 's/ data'}</div>
+                </div>
+                {(() => { const t = fichaTone(f.status); const c = t === 'ok' ? 'var(--c-okfg)' : t === 'proc' ? 'var(--c-softfg)' : 'var(--c-warnfg)'; return <span style={{ fontSize: 11, fontWeight: 700, color: c, flex: 'none' }}>{toneLabel(t)}</span>; })()}
+                <button onClick={() => (editId === f.id ? setEditId(null) : abrirEdicao(f))} className="ia-btn-outline" style={{ height: 32, padding: '0 12px', fontSize: 12, flex: 'none' }}>{editId === f.id ? 'Fechar' : 'Editar'}</button>
+              </div>
+              {editId === f.id && (
+                <div style={{ padding: '4px 14px 16px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                    {CAMPOS_FICHA.map((c) => (
+                      <div key={String(c.k)}>
+                        <label style={{ color: 'var(--c-ink3)', fontSize: 11, display: 'block', marginBottom: 3 }}>{c.label}</label>
+                        <input type={c.type ?? 'text'} value={(form[c.k] as string) ?? ''} onChange={(e) => setForm({ ...form, [c.k]: e.target.value })} style={inp} />
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+                    <button onClick={() => setEditId(null)} className="ia-btn-outline" style={{ padding: '8px 14px', fontSize: 13 }}>Cancelar</button>
+                    <button onClick={salvarUma} disabled={salvando} className="ia-btn" style={{ padding: '8px 16px' }}>{salvando ? 'Salvando…' : 'Salvar ficha'}</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function VerEnvio({ upload, onClose }: { upload: Upload; onClose: () => void }) {

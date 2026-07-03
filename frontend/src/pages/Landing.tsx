@@ -30,7 +30,7 @@ export default function Landing() {
       {/* NAV */}
       <header style={{ position: 'sticky', top: 0, zIndex: 40, background: 'var(--c-nav)', backdropFilter: 'blur(12px)', borderBottom: '1px solid var(--c-border)' }}>
         <div style={{ ...CONTAINER, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 24px' }}>
-          <div onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} style={{ display: 'flex', alignItems: 'center', gap: 11, cursor: 'pointer' }}><LogoMark size={34} /><span style={{ color: 'var(--c-ink)', fontWeight: 700, fontSize: 20, letterSpacing: '.02em' }}>IACMD</span></div>
+          <div onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} style={{ display: 'flex', alignItems: 'center', gap: 11, cursor: 'pointer' }}><LogoMark size={34} /><span style={{ color: 'var(--c-ink)', fontWeight: 700, fontSize: 20, letterSpacing: '.02em' }}>IA-CMD</span></div>
           <nav style={{ display: 'flex', gap: 26 }} className="lp-nav">
             {NAV.map((n) => <button key={n.id} onClick={() => scrollTo(n.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--c-ink2)', fontSize: 14, fontWeight: 500, fontFamily: 'inherit' }}>{n.label}</button>)}
           </nav>
@@ -171,11 +171,11 @@ export default function Landing() {
 
       {/* FOOTER */}
       <footer style={{ ...CONTAINER, padding: '56px 24px 40px', borderTop: '1px solid var(--c-border)', marginTop: 60, display: 'flex', justifyContent: 'space-between', gap: 40, flexWrap: 'wrap' }}>
-        <div style={{ maxWidth: 280 }}><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><LogoMark size={30} /><span style={{ color: 'var(--c-ink)', fontWeight: 700, fontSize: 18 }}>IACMD</span></div><p style={{ color: 'var(--c-ink3)', fontSize: 13, marginTop: 10 }}>Automação de cadastro de fichas de paciente para carretas e unidades móveis de saúde.</p></div>
+        <div style={{ maxWidth: 280 }}><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><LogoMark size={30} /><span style={{ color: 'var(--c-ink)', fontWeight: 700, fontSize: 18 }}>IA-CMD</span></div><p style={{ color: 'var(--c-ink3)', fontSize: 13, marginTop: 10 }}>Automação de cadastro de fichas de paciente para carretas e unidades móveis de saúde.</p></div>
         <FooterCol title="Produto" links={[['Como funciona', () => scrollTo('como')], ['Recursos', () => scrollTo('recursos')], ['Preços', () => scrollTo('precos')]]} />
         <FooterCol title="Conta" links={[['Entrar', () => nav('/login')], ['Criar conta', () => nav('/registro')]]} />
       </footer>
-      <div style={{ ...CONTAINER, padding: '0 24px 30px', color: 'var(--c-ink3)', fontSize: 12 }}>© {new Date().getFullYear()} IACMD · Todos os direitos reservados.</div>
+      <div style={{ ...CONTAINER, padding: '0 24px 30px', color: 'var(--c-ink3)', fontSize: 12 }}>© {new Date().getFullYear()} IA-CMD · Todos os direitos reservados.</div>
 
       {demo && <DemoModal onClose={() => setDemo(false)} onSent={() => { setDemo(false); showToast({ title: 'Pedido enviado', msg: 'Entramos em contato em até 1 dia útil.', kind: 'ok' }); }} />}
       {menu && null}

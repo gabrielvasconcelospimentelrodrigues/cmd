@@ -38,7 +38,7 @@ export function Shell({ theme, onToggleTheme, children }: { theme: string; onTog
       <div style={{ position: 'relative', zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 28px', maxWidth: 1180, margin: '0 auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
           <LogoMark />
-          <span style={{ color: 'var(--c-ink)', fontWeight: 700, fontSize: 20, letterSpacing: '.02em' }}>IACMD</span>
+          <span style={{ color: 'var(--c-ink)', fontWeight: 700, fontSize: 20, letterSpacing: '.02em' }}>IA-CMD</span>
         </div>
         <button onClick={onToggleTheme} title="Alternar tema" style={{ width: 38, height: 38, borderRadius: 10, border: '1px solid var(--c-border)', background: 'transparent', color: 'var(--c-ink)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
