@@ -113,7 +113,9 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
     if (submitting) return;
     setSubmitting(true);
     try {
-      await apiPost('/onboarding', {
+      // Cria a clínica e já contrata/aprova o 1º terminal (R$ 2.000/mês).
+      // Retorna a empresa padrão onde a conta CMD deve ser alocada.
+      const tenant = await apiPost<{ default_empresa_id?: number | null }>('/onboarding', {
         name: clinicName.trim(),
         cnpj: clinicCnpj,
         responsavel: clinicResp,
@@ -125,6 +127,8 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
         cmd_username: cmdEmail,
         cmd_password: cmdPass,
         mfa_secret: mfaMode === 'qr' ? extractedKey : manualKey.trim().toUpperCase(),
+        // Aloca a conta ao terminal contratado no onboarding (faturamento correto).
+        empresa_id: tenant?.default_empresa_id ?? null,
         // Regras clínicas → controles da conta.
         cid_oci_0_8: cidOci08.trim().toUpperCase(),
         cid_9_mais: cid9Mais.trim().toUpperCase(),
@@ -191,8 +195,12 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
             {step === 1 && (
               <div style={{ animation: 'ia-slide .25s ease' }}>
                 <h2 style={{ color: 'var(--c-ink)', fontSize: 24, fontWeight: 700, letterSpacing: '-.02em', margin: '14px 0 0' }}>Conectar conta CMD-COLETA</h2>
-                <p style={{ color: 'var(--c-ink2)', fontSize: 14, lineHeight: 1.6, margin: '8px 0 0' }}>Estas credenciais ficam criptografadas e são usadas apenas pela IA.</p>
-                <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 460 }}>
+                <p style={{ color: 'var(--c-ink2)', fontSize: 14, lineHeight: 1.6, margin: '8px 0 0' }}>Informe o <b>mesmo e-mail e senha que você usa para entrar no CMD-COLETA</b> (portal do governo). É com esse acesso que a IA faz os cadastros por você.</p>
+                <div style={{ marginTop: 16, maxWidth: 460, display: 'flex', gap: 10, alignItems: 'flex-start', padding: '12px 14px', background: 'var(--c-oksoft)', border: '1px solid var(--c-ok)', borderRadius: 10 }}>
+                  <ShieldCheck size={18} style={{ color: 'var(--c-ok)', flex: 'none', marginTop: 1 }} />
+                  <div style={{ color: 'var(--c-okfg)', fontSize: 13, lineHeight: 1.5 }}>Seus dados são <b>criptografados</b> e usados <b>exclusivamente para a automação da IA</b> — nunca compartilhados nem exibidos a terceiros.</div>
+                </div>
+                <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 460 }}>
                   <Field label="Identificação da conta" error={touched && !cmdLabel.trim() ? 'Dê um apelido para identificar esta conta.' : undefined}>
                     <input className={`ia-input ${touched && !cmdLabel.trim() ? 'err' : ''}`} value={cmdLabel} onChange={(e) => setCmdLabel(e.target.value)} placeholder={'Ex: "Unidade Centro" ou "Conta Principal"'} />
                   </Field>
