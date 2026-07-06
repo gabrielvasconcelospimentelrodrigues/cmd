@@ -138,6 +138,9 @@ export function startRegistrationWorker(): Worker<UploadJob> {
             mfaSecret: decrypt(conta.mfa_secret_encrypted),
             uploadId,
             onStep: (d) => void setUploadStatus(uploadId, 'registering', { current_step: d }),
+            // CID por idade (controles): 0–8 anos vs 9+ (fallback H53 dentro do motor).
+            cidOci0a8: conta.cid_oci_0_8,
+            cid9Mais: conta.cid_9_mais,
           });
           let precisaRetomar = false; // travou → pausa, alerta, retoma em 30s
           try {

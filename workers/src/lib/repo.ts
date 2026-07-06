@@ -11,6 +11,9 @@ export interface ContaInfo extends JanelaConfig {
   cmd_password_encrypted: string;
   mfa_secret_encrypted: string;
   cid_padrao: string; // CID-10 padrão (fallback quando a ficha não tem CID)
+  // Controles clínicos: CID por idade (calculado pela data de nascimento na automação).
+  cid_oci_0_8: string; // OCI de 0 a 8 anos
+  cid_9_mais: string; // acima de 9 anos
   delay_inicio_minutos: number;
 }
 
@@ -256,7 +259,7 @@ export async function getUploadComConta(uploadId: number): Promise<UploadComCont
     .from('uploads')
     .select(
       'id, status, clinic_account_id, file_path, mapeamento_campos, patients_registered, patients_errored, registro_iniciado_em, retry_rounds, ' +
-        'clinic_accounts:clinic_account_id (id, tenant_id, empresa_id, is_enabled, cmd_username, cmd_password_encrypted, mfa_secret_encrypted, cid_padrao, dias_execucao, horario_inicio_execucao, horario_fim_execucao, pausa_inicio, pausa_fim, delay_inicio_minutos)',
+        'clinic_accounts:clinic_account_id (id, tenant_id, empresa_id, is_enabled, cmd_username, cmd_password_encrypted, mfa_secret_encrypted, cid_padrao, cid_oci_0_8, cid_9_mais, dias_execucao, horario_inicio_execucao, horario_fim_execucao, pausa_inicio, pausa_fim, delay_inicio_minutos)',
     )
     .eq('id', uploadId)
     .single();

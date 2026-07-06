@@ -87,6 +87,9 @@ export interface ClinicAccount {
   cmd_password_encrypted: string; // ciphertext Fernet
   mfa_secret_encrypted: string; // ciphertext Fernet
   cid_padrao: string; // CID-10 padrão (fallback quando a ficha não tem CID)
+  // Controles clínicos (perguntas do onboarding) — Terminologia é sempre CID-10.
+  cid_oci_0_8: string; // categoria do CID p/ pacientes de OCI 0–8 anos
+  cid_9_mais: string; // categoria do CID p/ pacientes acima de 9 anos
   is_enabled: boolean;
   dias_execucao: number[]; // jsonb [0..6]
   horario_inicio_execucao: string | null; // 'HH:MM:SS'
@@ -217,7 +220,7 @@ export interface Database {
     Tables: {
       tenants: Tbl<Tenant, Insert<Tenant, 'status' | 'custo_mensal_funcionario' | 'salario_medio_funcionario' | 'horas_trabalhadas_mes' | 'salario_bruto_medio' | 'porcentagem_encargos' | 'beneficios_mensais_total' | 'custo_infra_estacao_trabalho' | 'horas_uteis_mes' | 'funcionarios_operacao' | 'cadastros_dia_funcionario' | 'cota_mensal_pacientes' | 'valor_terminal' | 'valor_implantacao' | 'implantacao_paga' | 'onboarding_concluido' | 'cnpj' | 'responsavel' | 'telefone' | 'cidade'>, Partial<Tenant>>;
       empresas: Tbl<Empresa, Insert<Empresa, 'cnpj' | 'taxa_empresa' | 'taxa_paga' | 'terminais_contratados'>, Partial<Empresa>>;
-      clinic_accounts: Tbl<ClinicAccount, Insert<ClinicAccount, 'empresa_id' | 'cid_padrao' | 'is_enabled' | 'dias_execucao' | 'horario_inicio_execucao' | 'horario_fim_execucao' | 'pausa_inicio' | 'pausa_fim' | 'delay_inicio_minutos' | 'last_run_at' | 'last_run_status'>, Partial<ClinicAccount>>;
+      clinic_accounts: Tbl<ClinicAccount, Insert<ClinicAccount, 'empresa_id' | 'cid_padrao' | 'cid_oci_0_8' | 'cid_9_mais' | 'is_enabled' | 'dias_execucao' | 'horario_inicio_execucao' | 'horario_fim_execucao' | 'pausa_inicio' | 'pausa_fim' | 'delay_inicio_minutos' | 'last_run_at' | 'last_run_status'>, Partial<ClinicAccount>>;
       api_usage_records: Tbl<ApiUsageRecord, Insert<ApiUsageRecord, 'tokens_entrada' | 'tokens_saida' | 'custo_estimado_usd' | 'contexto'>, Partial<ApiUsageRecord>>;
       api_tokens: Tbl<ApiToken, Insert<ApiToken, 'token' | 'ultimo_uso_em' | 'ativo'>, Partial<ApiToken>>;
       audit_logs: Tbl<AuditLog, Insert<AuditLog, 'usuario_id'>, Partial<AuditLog>>;

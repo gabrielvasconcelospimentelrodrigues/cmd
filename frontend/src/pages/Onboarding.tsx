@@ -10,8 +10,10 @@ const STEP_DATA = [
   { title: 'Conta CMD-COLETA', sub: 'E-mail e senha do governo' },
   { title: 'Autenticação 2FA', sub: 'Chave do app autenticador' },
   { title: 'Dados da clínica', sub: 'Identificação da operação' },
+  { title: 'Regras clínicas', sub: 'Alta e CID por tipo de paciente' },
   { title: 'Autorização', sub: 'Liberação do super admin' },
 ];
+const TOTAL_STEPS = 4; // etapas de preenchimento (a 5ª, Autorização, é pós-envio)
 const MFA_STEPS = [
   'Abra o Google Authenticator no seu celular.',
   'Toque nos três pontos (menu) e em "Transferir contas".',
@@ -48,7 +50,12 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
   const [clinicPhone, setClinicPhone] = useState('');
   const [clinicCity, setClinicCity] = useState('');
 
+  // Regras clínicas (última etapa) — salvas nos controles da conta CMD.
+  const [cidOci08, setCidOci08] = useState('');
+  const [cid9Mais, setCid9Mais] = useState('');
+
   const mfaBad = mfaMode === 'qr' ? !extractedKey : manualKey.trim().length < 12;
+  const regrasBad = !cidOci08.trim() || !cid9Mais.trim();
 
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -86,6 +93,8 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
       if (mfaBad) return;
     } else if (step === 3) {
       if (!clinicName.trim()) return;
+    } else if (step === 4) {
+      if (regrasBad) return;
       setConfirmOpen(true);
       return;
     }
@@ -116,6 +125,9 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
         cmd_username: cmdEmail,
         cmd_password: cmdPass,
         mfa_secret: mfaMode === 'qr' ? extractedKey : manualKey.trim().toUpperCase(),
+        // Regras clínicas → controles da conta.
+        cid_oci_0_8: cidOci08.trim().toUpperCase(),
+        cid_9_mais: cid9Mais.trim().toUpperCase(),
       });
       await onDone(); // parent → tela de "aguardando autorização"
     } catch (e) {
@@ -126,7 +138,7 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
   };
 
   const cur = step;
-  const nextLabel = step === 3 ? 'Concluir configuração' : 'Continuar';
+  const nextLabel = step === TOTAL_STEPS ? 'Concluir configuração' : 'Continuar';
 
   return (
     <Shell theme={theme} onToggleTheme={toggle}>
@@ -136,7 +148,7 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
           <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--c-surface2)', borderRight: '1px solid var(--c-border)', padding: '34px 28px' }}>
             <div style={{ color: 'var(--c-softfg)', fontSize: 12, fontWeight: 600, letterSpacing: '.08em', textTransform: 'uppercase' }}>Configuração inicial</div>
             <h2 style={{ color: 'var(--c-ink)', fontSize: 21, fontWeight: 700, margin: '10px 0 0' }}>Vamos preparar sua IA</h2>
-            <p style={{ color: 'var(--c-ink3)', fontSize: 13, lineHeight: 1.6, margin: '8px 0 0' }}>Três passos rápidos. Depois é só o super admin liberar.</p>
+            <p style={{ color: 'var(--c-ink3)', fontSize: 13, lineHeight: 1.6, margin: '8px 0 0' }}>Quatro passos rápidos. Depois é só o super admin liberar.</p>
 
             <div style={{ marginTop: 28, display: 'flex', flexDirection: 'column' }}>
               {STEP_DATA.map((d, i) => {
@@ -156,7 +168,7 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
                       }}>
                         {done ? <Check size={16} strokeWidth={2.6} /> : idx}
                       </div>
-                      {idx < 4 && <div style={{ width: 2, height: 34, background: idx < cur ? 'var(--c-blue)' : 'var(--c-border2)', margin: '4px 0' }} />}
+                      {idx < STEP_DATA.length && <div style={{ width: 2, height: 34, background: idx < cur ? 'var(--c-blue)' : 'var(--c-border2)', margin: '4px 0' }} />}
                     </div>
                     <div style={{ paddingTop: 6 }}>
                       <div style={{ color: done || active ? 'var(--c-ink)' : 'var(--c-ink3)', fontSize: 14, fontWeight: 600 }}>{d.title}</div>
@@ -174,7 +186,7 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
 
           {/* Formulário do passo */}
           <div style={{ padding: '36px 38px', minHeight: 540, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ color: 'var(--c-softfg)', fontSize: 12, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase' }}>Passo {step} de 3</div>
+            <div style={{ color: 'var(--c-softfg)', fontSize: 12, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase' }}>Passo {step} de {TOTAL_STEPS}</div>
 
             {step === 1 && (
               <div style={{ animation: 'ia-slide .25s ease' }}>
@@ -262,6 +274,33 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
                   <Field label="Responsável"><input className="ia-input" value={clinicResp} onChange={(e) => setClinicResp(e.target.value)} placeholder="Ex: João Pereira" /></Field>
                   <Field label="Telefone / WhatsApp"><input className="ia-input" value={clinicPhone} onChange={(e) => setClinicPhone(e.target.value)} placeholder="(11) 99876-5432" /></Field>
                   <Field label="Cidade / UF base"><input className="ia-input" value={clinicCity} onChange={(e) => setClinicCity(e.target.value)} placeholder="Ex: Teresina / PI" /></Field>
+                </div>
+              </div>
+            )}
+
+            {step === 4 && (
+              <div style={{ animation: 'ia-slide .25s ease' }}>
+                <h2 style={{ color: 'var(--c-ink)', fontSize: 24, fontWeight: 700, letterSpacing: '-.02em', margin: '14px 0 0' }}>Regras clínicas dos cadastros</h2>
+                <p style={{ color: 'var(--c-ink2)', fontSize: 14, lineHeight: 1.6, margin: '8px 0 0' }}>A IA usa essas regras para preencher a alta e o CID de cada paciente. Você pode alterá-las depois em <b>Controles</b>.</p>
+
+                <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 22, maxWidth: 560 }}>
+                  {/* Terminologia + categorias de CID */}
+                  <div>
+                    <label className="ia-label">Terminologia do problema</label>
+                    <div className="ia-input" style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: 320, background: 'var(--c-surface2)', color: 'var(--c-ink2)', cursor: 'default' }}>
+                      <ShieldCheck size={15} style={{ color: 'var(--c-ok)' }} /> CID-10 (padrão)
+                    </div>
+                    <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 5 }}>Informe a <b>categoria do CID</b> usada em cada tipo de paciente.</div>
+
+                    <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 14 }}>
+                      <Field label="CID p/ pacientes de OCI de 0 a 8 anos" error={touched && !cidOci08.trim() ? 'Informe a categoria do CID.' : undefined}>
+                        <input className={`ia-input ia-mono ${touched && !cidOci08.trim() ? 'err' : ''}`} value={cidOci08} onChange={(e) => setCidOci08(e.target.value.toUpperCase())} placeholder="Ex: H53" style={{ textTransform: 'uppercase' }} />
+                      </Field>
+                      <Field label="CID p/ pacientes acima de 9 anos" error={touched && !cid9Mais.trim() ? 'Informe a categoria do CID.' : undefined}>
+                        <input className={`ia-input ia-mono ${touched && !cid9Mais.trim() ? 'err' : ''}`} value={cid9Mais} onChange={(e) => setCid9Mais(e.target.value.toUpperCase())} placeholder="Ex: H53" style={{ textTransform: 'uppercase' }} />
+                      </Field>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

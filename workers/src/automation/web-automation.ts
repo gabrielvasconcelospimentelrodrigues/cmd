@@ -12,6 +12,13 @@ import { generateTotp } from './totp';
  */
 const URL_LOGIN = 'https://acesso.saude.gov.br/login';
 
+// ⚠️ REGRA PROVISÓRIA (remover depois): dá até 5 minutos para o trecho
+// login → tela "Contatos Assistenciais" (onde costuma travar) se resolver,
+// reinsistindo nos redirects/perfil/ACESSAR. Os demais passos seguem os
+// timeouts padrão. Para desativar: baixar de volta para ~40_000ms (ou remover
+// o loop de reinsistência em login()).  [pendência lembrada ao usuário]
+const PROVISORIO_LOGIN_ATE_CONTATOS_MS = 5 * 60_000;
+
 // Códigos de procedimento (SIGTAP) — porta de PROCEDURE_CODES (web_automation.py).
 // 1 a 5 valem a partir de 9 anos; 6 substitui o 1 para 0 a 8 anos.
 const PROCEDURE_CODES: Record<number, [string, string]> = {
@@ -115,6 +122,9 @@ export interface AutomatorOpts {
   uploadId: number;
   headless?: boolean;
   onStep?: (descricao: string) => void;
+  // Controles clínicos: CID escolhido pela idade (calculada da data de nascimento).
+  cidOci0a8?: string; // paciente de OCI de 0 a 8 anos
+  cid9Mais?: string; // paciente acima de 9 anos
 }
 
 export class WebAutomator {
@@ -182,6 +192,93 @@ export class WebAutomator {
     return generateTotp(this.opts.mfaSecret);
   }
 
+  /**
+   * Espera a URL parar de mudar (SSO do gov.br encadeia redirects). Considera
+   * estável quando fica igual por 2 checagens seguidas, ou estoura o timeout.
+   */
+  private async esperarUrlEstavel(page: Page, timeoutMs: number): Promise<void> {
+    const fim = Date.now() + timeoutMs;
+    let anterior = '';
+    let estaveis = 0;
+    while (Date.now() < fim) {
+      await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+      const atual = page.url();
+      if (atual === anterior && atual) {
+        if (++estaveis >= 2) break;
+      } else {
+        estaveis = 0;
+        anterior = atual;
+      }
+      await page.waitForTimeout(1500);
+    }
+    // Assenta requisições pendentes (XHR do app) antes de tocar no DOM.
+    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+  }
+
+  /**
+   * Tela de escolha de perfil do SCPA (gov.br). O campo é um combo do Design
+   * System gov.br rotulado "Usuário"/"Perfil": clica pra abrir e escolhe a
+   * esfera "Ministério da Saúde". Estratégia em camadas, tolerante a variação:
+   *   1) se a esfera já estiver clicável, clica direto;
+   *   2) senão abre o combo (label, input, setinha ou o próprio texto "Usuário");
+   *   3) escolhe a opção que contém "Ministério da Saúde".
+   * Se a tela nem existir (login já trouxe direto ao app), sai sem erro.
+   */
+  private async selecionarPerfilMinisterio(page: Page): Promise<void> {
+    const alvo = /minist[ée]rio da sa[úu]de/i;
+
+    for (let tentativa = 0; tentativa < 5; tentativa++) {
+      // (1) A esfera já está visível e clicável?
+      const esfera = page.getByText(alvo).first();
+      if (await esfera.isVisible({ timeout: 1500 }).catch(() => false)) {
+        this.passo('Selecionando perfil "Ministério da Saúde"...');
+        await esfera.click({ timeout: 5000 }).catch(() => {});
+        await page.waitForTimeout(2500);
+        // Confirma que saiu da tela de perfil.
+        if (!(await this.pareceTelaPerfil(page))) return;
+      }
+
+      // Não é (mais) a tela de perfil? Então segue o fluxo.
+      if (!(await this.pareceTelaPerfil(page))) return;
+
+      // (2) Abre o combo. Tenta vários gatilhos, na ordem de robustez.
+      this.passo('Abrindo seletor de perfil...');
+      const abridores = [
+        page.getByRole('combobox').first(),
+        page.locator('label:has-text("Usuário"), label:has-text("Perfil")').first(),
+        page.locator('.br-select, .br-input, input[readonly], .selectized, .dropdown-toggle').first(),
+        page.locator('i.fa-angle-down, i.fas.fa-angle-down, .br-select .icon, [class*="chevron"]').first(),
+        page.getByText('Usuário', { exact: true }).first(),
+      ];
+      for (const ab of abridores) {
+        if (await ab.count().then((c) => c > 0).catch(() => false)) {
+          await ab.click({ timeout: 3000 }).catch(() => {});
+          await page.waitForTimeout(1000);
+          const op = page.getByText(alvo).first();
+          if (await op.isVisible({ timeout: 1500 }).catch(() => false)) break;
+        }
+      }
+      await page.waitForTimeout(800);
+    }
+
+    // Se chegou aqui e ainda parece a tela de perfil, registra e segue mesmo
+    // assim (o dashboard-check adiante decide se deu certo).
+    if (await this.pareceTelaPerfil(page)) {
+      this.passo('Não consegui confirmar a seleção de perfil — seguindo mesmo assim.');
+    }
+  }
+
+  /** Heurística: ainda estamos na tela de escolha de perfil? */
+  private async pareceTelaPerfil(page: Page): Promise<boolean> {
+    const temUsuarioOuPerfil =
+      (await page.getByText('Selecione', { exact: false }).count().catch(() => 0)) > 0 ||
+      (await page.getByText('perfil', { exact: false }).count().catch(() => 0)) > 0;
+    const temDashboard =
+      (await page.getByRole('button', { name: 'Incluir contato assistencial' }).count().catch(() => 0)) > 0 ||
+      (await page.getByText('ACESSAR', { exact: true }).count().catch(() => 0)) > 0;
+    return temUsuarioOuPerfil && !temDashboard;
+  }
+
   // ---- Login (porta fiel de web_automation.py:login) ----------------------
   async login(): Promise<void> {
     if (!this.page) await this.start();
@@ -229,83 +326,86 @@ export class WebAutomator {
       }
     }
 
-    this.passo('Login aceito, carregando próxima tela...');
-    await page.waitForTimeout(8000);
+    this.passo('Login aceito, aguardando redirecionamentos do gov.br...');
 
-    // Tela de escolha de perfil do gov.br/SCPA: abre o dropdown "Usuário"
-    // (setinha) e escolhe a esfera "Ministério da Saúde". O texto pode ser
-    // "Ministério da Saúde" OU "Esfera Ministério da Saúde" → match parcial.
-    // Tenta algumas vezes: se não achar a esfera, reabre o dropdown.
-    for (let t = 0; t < 4; t++) {
-      const esfera = page.getByText('Ministério da Saúde', { exact: false }).first();
-      // Já dá pra clicar direto na esfera?
-      if (await esfera.isVisible({ timeout: 1500 }).catch(() => false)) {
-        await esfera.click({ timeout: 5000 }).catch(() => {});
-        await page.waitForTimeout(3000);
-        break;
+    // O SSO do gov.br encadeia vários redirects (login → scpa → sso → app).
+    // Espera a URL PARAR de mudar antes de tocar na página — assim evitamos o
+    // "Execution context was destroyed" que acontecia ao mexer no meio do redirect.
+    await this.esperarUrlEstavel(page, 25_000);
+
+    // [DEBUG] Salva screenshot + HTML em DISCO (uma vez) pra inspeção real da
+    // tela de perfil. Escrever em disco é mais robusto que console.log (não
+    // trunca nem corre com a navegação). Desligado por padrão em produção.
+    if (process.env.DEBUG_PERFIL === '1') {
+      const dir = process.env.DEBUG_PERFIL_DIR || '.';
+      try {
+        await page.screenshot({ path: `${dir}/perfil.png`, fullPage: true }).catch(() => {});
+        const html = await page.content().catch(() => '');
+        await import('node:fs/promises').then((fs) => fs.writeFile(`${dir}/perfil.html`, html, 'utf8')).catch(() => {});
+        console.log(`[DEBUG perfil] salvo em ${dir}/perfil.{png,html} | url=${page.url()}`);
+      } catch (e) {
+        console.log(`[DEBUG perfil] falha ao salvar: ${(e as Error).message.slice(0, 100)}`);
       }
-      // Senão, abre o seletor de perfil "Usuário" (clica no dropdown/setinha).
-      const temPerfil =
-        (await page.getByText('perfil', { exact: false }).count()) > 0 ||
-        (await page.getByText('Usuário', { exact: true }).count()) > 0;
-      if (!temPerfil) break; // não é a tela de perfil — segue
-      await page.getByText('Usuário', { exact: true }).first().click({ timeout: 5000 }).catch(() => {});
-      await page.waitForTimeout(1200);
-      const esfera2 = page.getByText('Ministério da Saúde', { exact: false }).first();
-      if (await esfera2.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await esfera2.click({ timeout: 5000 }).catch(() => {});
-        await page.waitForTimeout(3000);
-        break;
-      }
-      await page.waitForTimeout(1500);
     }
 
-    // Portal "Meus Sistemas" → "ACESSAR" abre o CMD-COLETA em nova aba.
-    try {
-      const [novaAba] = await Promise.all([
-        this.context!.waitForEvent('page', { timeout: 8000 }),
-        page.getByText('ACESSAR', { exact: true }).click({ timeout: 5000 }),
-      ]);
-      await novaAba.waitForLoadState();
-      this.page = novaAba;
-      this.page.setDefaultTimeout(45_000);
-      await this.stopScreencast();
-      await this.startScreencast();
-      await this.page.waitForTimeout(2000);
+    await this.selecionarPerfilMinisterio(page);
 
-      for (let t = 0; t < 4; t++) {
-        if (!this.page.url().includes('login')) break;
-        await this.page.getByRole('button', { name: 'Entrar', exact: true }).click({ timeout: 5000 }).catch(() => {});
-        await this.page.waitForTimeout(5000);
-        if (this.page.url().includes('login')) {
-          await this.page.goto('https://cmd-coleta.saude.gov.br/#/home');
-          await this.page.waitForTimeout(5000);
+    // ⚠️ REGRA PROVISÓRIA (5 min): reinsiste no trecho perfil → ACESSAR →
+    // CMD-COLETA até a tela "Contatos Assistenciais" (botão "Incluir contato
+    // assistencial") aparecer, ou estourar PROVISORIO_LOGIN_ATE_CONTATOS_MS.
+    // Cada tentativa refaz: seleção de perfil, abrir a nova aba pelo "ACESSAR"
+    // e, se cair no login do app, "Entrar"/goto home.
+    const prazo = Date.now() + PROVISORIO_LOGIN_ATE_CONTATOS_MS;
+    let dashboardOk = false;
+    let tentativa = 0;
+    while (Date.now() < prazo && !dashboardOk) {
+      tentativa++;
+      const restanteMin = Math.max(0, Math.ceil((prazo - Date.now()) / 60_000));
+      this.passo(`Abrindo CMD-COLETA (tentativa ${tentativa}, até ${restanteMin} min)...`);
+
+      // Reforça a seleção de perfil caso ainda esteja na tela do SCPA.
+      await this.selecionarPerfilMinisterio(this.page!).catch(() => {});
+
+      // Portal "Meus Sistemas" → "ACESSAR" abre o CMD-COLETA em nova aba.
+      try {
+        const [novaAba] = await Promise.all([
+          this.context!.waitForEvent('page', { timeout: 8000 }),
+          page.getByText('ACESSAR', { exact: true }).click({ timeout: 5000 }),
+        ]);
+        await novaAba.waitForLoadState();
+        this.page = novaAba;
+        this.page.setDefaultTimeout(45_000);
+        await this.stopScreencast();
+        await this.startScreencast();
+        await this.page.waitForTimeout(2000);
+      } catch {
+        /* já no app ou ainda sem o botão ACESSAR — segue */
+      }
+
+      // Se a aba do app caiu no login, tenta "Entrar"/ir pra home.
+      for (let t = 0; t < 3; t++) {
+        if (!this.page!.url().includes('login')) break;
+        await this.page!.getByRole('button', { name: 'Entrar', exact: true }).click({ timeout: 5000 }).catch(() => {});
+        await this.page!.waitForTimeout(4000);
+        if (this.page!.url().includes('login')) {
+          await this.page!.goto('https://cmd-coleta.saude.gov.br/#/home').catch(() => {});
+          await this.page!.waitForTimeout(4000);
         }
       }
-    } catch {
-      /* já no app */
+
+      // Dashboard já apareceu? (espera curta; o laço externo é quem dá os 5 min)
+      dashboardOk = await this.page!.getByRole('button', { name: 'Incluir contato assistencial' })
+        .first().waitFor({ state: 'visible', timeout: 20_000 }).then(() => true).catch(() => false);
+
+      if (!dashboardOk) await this.page!.waitForTimeout(3000);
     }
 
-    // Espera o dashboard (botão "Incluir contato assistencial") até 40s.
-    let dashboardOk = false;
-    try {
-      await this.page!.getByRole('button', { name: 'Incluir contato assistencial' }).first().waitFor({ state: 'visible', timeout: 40_000 });
-      dashboardOk = true;
-    } catch {
-      /* segue — pode haver modal ou ainda estar na tela de perfil */
-    }
-    // Se NÃO abriu o CMD e ainda está na tela de acesso/perfil, o login não
-    // concluiu — falha explícita para não tentar cadastrar numa tela errada.
     if (!dashboardOk) {
-      const p = this.page!;
-      const naTelaPerfil =
-        p.url().includes('acesso.saude.gov.br') ||
-        (await p.getByText('perfil', { exact: false }).count()) > 0 ||
-        (await p.getByText('Ministério da Saúde', { exact: false }).count()) > 0;
-      if (naTelaPerfil) {
-        throw new Error('Não foi possível concluir o login: travou na escolha de perfil (Usuário → Ministério da Saúde).');
-      }
+      // Estourou os 5 min sem chegar na tela de contatos → falha explícita para
+      // o retry/relogin de nível superior tratar (em vez de seguir cego).
+      throw new Error('Não foi possível chegar à tela "Contatos Assistenciais" em 5 min (regra provisória).');
     }
+
     await this.dispensarModalSair();
     this.passo('Login concluído — CMD-COLETA aberto.');
   }
@@ -446,15 +546,36 @@ export class WebAutomator {
     return null;
   }
 
-  /** Códigos de procedimento conforme a idade na data do atendimento. */
-  private calculateProcedureCodes(dataNascimento: Date | null, dataAtendimento: Date): number[] {
-    if (!dataNascimento) throw new Error('Data de nascimento ausente — não é possível calcular o procedimento correto.');
+  /** Idade (anos completos) na data do atendimento, ou null se não há nascimento. */
+  private idadeNaData(dataNascimento: Date | null, dataAtendimento: Date): number | null {
+    if (!dataNascimento) return null;
     let idade = dataAtendimento.getFullYear() - dataNascimento.getFullYear();
     const antesDoAniversario =
       dataAtendimento.getMonth() < dataNascimento.getMonth() ||
       (dataAtendimento.getMonth() === dataNascimento.getMonth() && dataAtendimento.getDate() < dataNascimento.getDate());
     if (antesDoAniversario) idade--;
+    return idade;
+  }
+
+  /** Códigos de procedimento conforme a idade na data do atendimento. */
+  private calculateProcedureCodes(dataNascimento: Date | null, dataAtendimento: Date): number[] {
+    const idade = this.idadeNaData(dataNascimento, dataAtendimento);
+    if (idade === null) throw new Error('Data de nascimento ausente — não é possível calcular o procedimento correto.');
     return idade <= 8 ? [6, 2, 3, 4, 5] : [1, 2, 3, 4, 5];
+  }
+
+  /**
+   * CID-10 escolhido pela idade na data do atendimento (regra dos controles):
+   * até 8 anos → CID de OCI 0–8; a partir de 9 → CID acima de 9 anos.
+   * Sem data de nascimento, assume 9+ (maioria) — o passo de procedimentos, que
+   * exige a idade, é quem barra o cadastro se ela realmente faltar.
+   * Fallback para 'H53' se os controles não estiverem configurados.
+   */
+  private cidPorIdade(dataNascimento: Date | null, dataAtendimento: Date): string {
+    const idade = this.idadeNaData(dataNascimento, dataAtendimento);
+    const cid0a8 = (this.opts.cidOci0a8 || '').trim().toUpperCase() || 'H53';
+    const cid9 = (this.opts.cid9Mais || '').trim().toUpperCase() || 'H53';
+    return idade !== null && idade <= 8 ? cid0a8 : cid9;
   }
 
   /** Busca o médico no select 'profissional' e seleciona a opção mais próxima. */
@@ -571,8 +692,8 @@ export class WebAutomator {
     if (!patient.dataAtendimento) {
       throw new Error(`data_atendimento ausente para ${nome || cns} — verifique se a coluna de data foi mapeada no arquivo importado.`);
     }
-    // Regra fixa (spec): o CID-10 é SEMPRE H53, independente do arquivo — não
-    // depende de coluna de CID na ficha nem de override. Portanto não bloqueia.
+    // O CID-10 é definido pela idade do paciente (controles: OCI 0–8 vs 9+),
+    // não pela coluna de CID da ficha — por isso não bloqueia aqui.
     const dataAtendimentoStr = fmtDate(patient.dataAtendimento);
     this.passo(`Iniciando cadastro de ${nome || 'paciente'} (CNS ${cns})...`);
 
@@ -651,9 +772,11 @@ export class WebAutomator {
       await page.waitForTimeout(1500);
     }
 
-    // Regra fixa: CID-10 SEMPRE H53, independente do arquivo/override.
-    const cid10Valor = 'H53';
-    this.passo(`Registrando diagnóstico CID-10 (${cid10Valor})...`);
+    // CID-10 pela idade (controles): usa a data de nascimento do CADSUS (lida
+    // acima) para escolher entre "OCI 0–8 anos" e "acima de 9 anos".
+    const cid10Valor = this.cidPorIdade(patient.dataNascimento, patient.dataAtendimento);
+    const idadePaciente = this.idadeNaData(patient.dataNascimento, patient.dataAtendimento);
+    this.passo(`Registrando diagnóstico CID-10 (${cid10Valor}${idadePaciente !== null ? `, ${idadePaciente} anos` : ''})...`);
     await this.autocompleteComOverride(overrides, 'terminologia_diagnostico', 'terminologia', 'CID-10', 'CID-10');
     await this.autocompleteComOverride(overrides, 'classificacao_diagnostico', 'categoria', 'Principal', 'Principal');
     await this.selecionarNgAutocomplete('problemaDiagnostico', cid10Valor, cid10Valor);

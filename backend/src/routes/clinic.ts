@@ -4,6 +4,23 @@ import { encrypt } from '../lib/crypto';
 import { registrarLog, ator, atorNome } from '../lib/audit';
 import type { Database } from '../types/database';
 
+// Colunas seguras de clinic_accounts devolvidas ao cliente (sem cifras).
+const SELECT_CONTA =
+  'id, label, cmd_username, is_enabled, cid_padrao, ' +
+  'cid_oci_0_8, cid_9_mais, dias_execucao, horario_inicio_execucao, ' +
+  'horario_fim_execucao, pausa_inicio, pausa_fim, delay_inicio_minutos, ' +
+  'empresa_id, last_run_at, last_run_status, created_at';
+
+/** Extrai/normaliza os controles clínicos do body (onboarding e edição). Só
+ * inclui as chaves presentes — serve tanto para insert quanto para patch. */
+function controlesClinicosDoBody(body: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const cid = (v: unknown) => String(v ?? '').trim().toUpperCase() || 'H53';
+  if ('cid_oci_0_8' in body) out.cid_oci_0_8 = cid(body.cid_oci_0_8);
+  if ('cid_9_mais' in body) out.cid_9_mais = cid(body.cid_9_mais);
+  return out;
+}
+
 /**
  * Rotas da clínica do usuário autenticado: dados da própria clínica e as
  * contas CMD-COLETA. Credenciais cifradas NUNCA são retornadas.
@@ -18,11 +35,7 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
   app.get('/clinic-accounts', { preHandler: app.authenticate }, async (req) => {
     const { data } = await supabaseAdmin
       .from('clinic_accounts')
-      .select(
-        'id, label, cmd_username, is_enabled, cid_padrao, dias_execucao, horario_inicio_execucao, ' +
-          'horario_fim_execucao, pausa_inicio, pausa_fim, delay_inicio_minutos, ' +
-          'empresa_id, last_run_at, last_run_status, created_at',
-      )
+      .select(SELECT_CONTA)
       .eq('tenant_id', req.tenant!.id)
       .order('created_at', { ascending: true });
     return data ?? [];
@@ -84,8 +97,10 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
         cmd_password_encrypted: encrypt(body.cmd_password),
         mfa_secret_encrypted: encrypt(body.mfa_secret ?? ''),
         empresa_id: body.empresa_id ? Number(body.empresa_id) : null,
+        // Controles clínicos vindos do onboarding (usa defaults do banco se ausentes).
+        ...controlesClinicosDoBody(req.body as Record<string, unknown>),
       })
-      .select('id, label, cmd_username, is_enabled, empresa_id, created_at')
+      .select(SELECT_CONTA)
       .single();
     if (error || !data) {
       req.log.error(error);
@@ -108,6 +123,8 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
     ] as const;
     const patch: Record<string, unknown> = {};
     for (const k of permitidos) if (k in body) patch[k] = body[k];
+    // Controles clínicos (alta + CID por tipo de paciente).
+    Object.assign(patch, controlesClinicosDoBody(body));
 
     if (body.empresa_id !== undefined) {
       if (body.empresa_id !== null) {
@@ -138,7 +155,7 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
       .update(patch as Database['public']['Tables']['clinic_accounts']['Update'])
       .eq('id', id)
       .eq('tenant_id', req.tenant!.id)
-      .select('id, label, cmd_username, is_enabled, cid_padrao, dias_execucao, horario_inicio_execucao, horario_fim_execucao, pausa_inicio, pausa_fim, delay_inicio_minutos, empresa_id, last_run_at, last_run_status, created_at')
+      .select(SELECT_CONTA)
       .maybeSingle();
     if (error) {
       req.log.error(error);

@@ -39,6 +39,9 @@ export interface ClinicAccount {
   is_enabled: boolean;
   empresa_id: number | null;
   cid_padrao: string;
+  // Controles clínicos (perguntas do onboarding) — Terminologia é sempre CID-10.
+  cid_oci_0_8: string;
+  cid_9_mais: string;
   dias_execucao: number[];
   horario_inicio_execucao: string | null;
   horario_fim_execucao: string | null;

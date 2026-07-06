@@ -54,6 +54,9 @@ function AccountCard({ conta, empresas, onChange, showToast }: { conta: ClinicAc
   const [delay, setDelay] = useState(conta.delay_inicio_minutos ?? 0);
   const [cidPadrao, setCidPadrao] = useState(conta.cid_padrao ?? '');
   const [empresaId, setEmpresaId] = useState<number | ''>(conta.empresa_id ?? '');
+  // Regras clínicas (controles)
+  const [cidOci08, setCidOci08] = useState(conta.cid_oci_0_8 ?? 'H53');
+  const [cid9Mais, setCid9Mais] = useState(conta.cid_9_mais ?? 'H53');
   const [salvando, setSalvando] = useState(false);
   const [editCred, setEditCred] = useState(false);
 
@@ -80,6 +83,8 @@ function AccountCard({ conta, empresas, onChange, showToast }: { conta: ClinicAc
         delay_inicio_minutos: delay,
         cid_padrao: cidPadrao.trim(),
         empresa_id: empresaId || null,
+        cid_oci_0_8: cidOci08.trim().toUpperCase() || 'H53',
+        cid_9_mais: cid9Mais.trim().toUpperCase() || 'H53',
       });
       await onChange();
       showToast({ title: 'Salvo', msg: 'Controles atualizados.', kind: 'ok' });
@@ -123,6 +128,23 @@ function AccountCard({ conta, empresas, onChange, showToast }: { conta: ClinicAc
             style={{ width: '100%', textTransform: 'uppercase' }}
           />
           <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 5 }}>Usado quando a ficha não traz CID.</div>
+        </div>
+      </div>
+
+      {/* Regras clínicas (perguntas do onboarding) */}
+      <div style={{ marginTop: 20, padding: '16px 18px', background: 'var(--c-surface2)', border: '1px solid var(--c-border)', borderRadius: 10 }}>
+        <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 700 }}>Regras clínicas</div>
+        <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 3 }}>Terminologia do problema: <b>CID-10</b> (padrão). Informe a categoria do CID por tipo de paciente.</div>
+
+        <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 16 }}>
+          <div>
+            <label className="ia-label">CID — OCI 0 a 8 anos</label>
+            <input className="ia-input ia-mono" value={cidOci08} onChange={(e) => setCidOci08(e.target.value.toUpperCase())} placeholder="Ex: H53" style={{ width: '100%', textTransform: 'uppercase' }} />
+          </div>
+          <div>
+            <label className="ia-label">CID — acima de 9 anos</label>
+            <input className="ia-input ia-mono" value={cid9Mais} onChange={(e) => setCid9Mais(e.target.value.toUpperCase())} placeholder="Ex: H53" style={{ width: '100%', textTransform: 'uppercase' }} />
+          </div>
         </div>
       </div>
 
