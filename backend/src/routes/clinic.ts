@@ -6,7 +6,7 @@ import type { Database } from '../types/database';
 
 // Colunas seguras de clinic_accounts devolvidas ao cliente (sem cifras).
 const SELECT_CONTA =
-  'id, label, cmd_username, is_enabled, cid_padrao, ' +
+  'id, label, cmd_username, is_enabled, cid_padrao, member_user_id, ' +
   'cid_oci_0_8, cid_9_mais, dias_execucao, horario_inicio_execucao, ' +
   'horario_fim_execucao, pausa_inicio, pausa_fim, delay_inicio_minutos, ' +
   'empresa_id, last_run_at, last_run_status, created_at';
@@ -28,17 +28,44 @@ function controlesClinicosDoBody(body: Record<string, unknown>): Record<string, 
 export async function clinicRoutes(app: FastifyInstance): Promise<void> {
   // Quem sou eu + minha clínica.
   app.get('/me', { preHandler: app.authenticate }, async (req) => {
-    return { user: req.authUser, tenant: req.tenant };
+    // member != null → é membro de equipe (acesso restrito ao próprio terminal).
+    return { user: req.authUser, tenant: req.tenant, member: req.member };
   });
 
   // Contas CMD-COLETA da clínica (sem expor senha/MFA cifrados).
   app.get('/clinic-accounts', { preHandler: app.authenticate }, async (req) => {
-    const { data } = await supabaseAdmin
+    let q = supabaseAdmin
       .from('clinic_accounts')
       .select(SELECT_CONTA)
-      .eq('tenant_id', req.tenant!.id)
-      .order('created_at', { ascending: true });
-    return data ?? [];
+      .eq('tenant_id', req.tenant!.id);
+    // Membro enxerga os terminais DESIGNADOS a ele + os LIVRES da empresa dele.
+    if (req.member) {
+      const empFiltro = req.member.empresa_id == null ? 'empresa_id.is.null' : `empresa_id.eq.${req.member.empresa_id}`;
+      q = q.or(`member_user_id.eq.${req.member.user_id},and(member_user_id.is.null,${empFiltro})`);
+    }
+    const { data } = await q.order('created_at', { ascending: true });
+
+    // Busca quais slots estão ocupados no momento para este tenant.
+    const { data: active } = await (supabaseAdmin as any)
+      .from('uploads')
+      .select('clinic_account_id, terminal_slot')
+      .in('status', ['registering', 'extracting'])
+      .is('deleted_at', null);
+
+    const occupiedMap = new Map<number, number[]>();
+    for (const act of (active ?? []) as { clinic_account_id: number | null; terminal_slot: number | null }[]) {
+      if (act.clinic_account_id && act.terminal_slot) {
+        const caId = Number(act.clinic_account_id);
+        const slot = Number(act.terminal_slot);
+        if (!occupiedMap.has(caId)) occupiedMap.set(caId, []);
+        occupiedMap.get(caId)!.push(slot);
+      }
+    }
+
+    return (data ?? []).map((ca: any) => ({
+      ...ca,
+      busy_slots: occupiedMap.get(Number(ca.id)) ?? []
+    }));
   });
 
   // Conecta uma nova conta CMD-COLETA (credenciais cifradas em repouso).
@@ -52,6 +79,12 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
     };
     if (!body.label || !body.cmd_username || !body.cmd_password) {
       return reply.code(400).send({ error: 'label, cmd_username e cmd_password são obrigatórios.' });
+    }
+
+    // MEMBRO de equipe: a conta que ele conecta é designada a ele, na empresa
+    // dele. A cota (max_terminais) já limita o total; sem limite fixo por membro.
+    if (req.member) {
+      body.empresa_id = req.member.empresa_id; // sempre a empresa do membro
     }
 
     // Check terminal limit
@@ -97,6 +130,8 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
         cmd_password_encrypted: encrypt(body.cmd_password),
         mfa_secret_encrypted: encrypt(body.mfa_secret ?? ''),
         empresa_id: body.empresa_id ? Number(body.empresa_id) : null,
+        // Vincula ao membro quando quem conecta é membro de equipe.
+        member_user_id: req.member ? req.member.user_id : null,
         // Controles clínicos vindos do onboarding (usa defaults do banco se ausentes).
         ...controlesClinicosDoBody(req.body as Record<string, unknown>),
       })
@@ -148,15 +183,36 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
     if (typeof body.cmd_password === 'string' && body.cmd_password) patch.cmd_password_encrypted = encrypt(body.cmd_password);
     if (typeof body.mfa_secret === 'string') patch.mfa_secret_encrypted = encrypt(body.mfa_secret);
 
+    // Membro não muda a empresa do próprio terminal (fica na empresa dele).
+    if (req.member) delete patch.empresa_id;
+
+    // DESIGNAÇÃO: só o DONO designa um terminal a um membro (ou o deixa livre).
+    // member_user_id = null → terminal livre (compartilhado); = <uuid> → exclusivo.
+    if (!req.member && 'member_user_id' in body) {
+      const alvo = body.member_user_id;
+      if (alvo === null || alvo === '') {
+        patch.member_user_id = null;
+      } else {
+        // Valida: o alvo é membro deste tenant e da MESMA empresa do terminal.
+        const { data: conta } = await supabaseAdmin.from('clinic_accounts').select('empresa_id').eq('id', id).eq('tenant_id', req.tenant!.id).maybeSingle();
+        const { data: mem } = await (supabaseAdmin as any).from('tenant_members').select('empresa_id').eq('tenant_id', req.tenant!.id).eq('user_id', String(alvo)).maybeSingle();
+        if (!mem) return reply.code(400).send({ error: 'Membro inválido.' });
+        if ((conta as any)?.empresa_id && (mem as any).empresa_id && (conta as any).empresa_id !== (mem as any).empresa_id) {
+          return reply.code(400).send({ error: 'O terminal e o membro precisam ser da mesma empresa.' });
+        }
+        patch.member_user_id = String(alvo);
+      }
+    }
+
     if (Object.keys(patch).length === 0) return reply.code(400).send({ error: 'Nada para atualizar.' });
 
-    const { data, error } = await supabaseAdmin
+    let upd = supabaseAdmin
       .from('clinic_accounts')
       .update(patch as Database['public']['Tables']['clinic_accounts']['Update'])
       .eq('id', id)
-      .eq('tenant_id', req.tenant!.id)
-      .select(SELECT_CONTA)
-      .maybeSingle();
+      .eq('tenant_id', req.tenant!.id);
+    if (req.member) upd = upd.eq('member_user_id', req.member.user_id); // só o próprio terminal
+    const { data, error } = await upd.select(SELECT_CONTA).maybeSingle();
     if (error) {
       req.log.error(error);
       return reply.code(500).send({ error: 'Falha ao atualizar a conta.' });
@@ -169,11 +225,13 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
   app.delete('/clinic-accounts/:id', { preHandler: app.authenticate }, async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
-    const { error } = await supabaseAdmin
+    let del = supabaseAdmin
       .from('clinic_accounts')
       .delete()
       .eq('id', id)
       .eq('tenant_id', req.tenant!.id);
+    if (req.member) del = del.eq('member_user_id', req.member.user_id); // só o próprio terminal
+    const { error } = await del;
     if (error) {
       req.log.error(error);
       return reply.code(500).send({ error: 'Falha ao remover a conta.' });

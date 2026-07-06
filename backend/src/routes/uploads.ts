@@ -190,6 +190,29 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
   app.get('/uploads', { preHandler: [app.authenticate, app.requireActive] }, async (req) => {
     const tenantId = req.tenant!.id;
 
+    if (req.member) {
+      const { data: cas } = await supabaseAdmin
+        .from('clinic_accounts')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .eq('member_user_id', req.member.user_id);
+      const caIds = (cas ?? []).map(c => Number(c.id));
+
+      const query = (supabaseAdmin as any)
+        .from('uploads')
+        .select('*, clinic_accounts(label), empresas(nome)')
+        .is('deleted_at', null);
+
+      if (caIds.length > 0) {
+        query.or(`uploaded_by.eq.${req.member.user_id},clinic_account_id.in.(${caIds.join(',')})`);
+      } else {
+        query.eq('uploaded_by', req.member.user_id);
+      }
+
+      const { data } = await query.order('uploaded_at', { ascending: false }).limit(100);
+      return data ?? [];
+    }
+
     const { data: emps } = await supabaseAdmin.from('empresas').select('id').eq('tenant_id', tenantId);
     const empIds = (emps ?? []).map(e => e.id);
 
@@ -261,9 +284,19 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
 
   // ---- Todas as fichas (patient_records) da clínica ------------------------
   app.get('/patients', { preHandler: [app.authenticate, app.requireActive] }, async (req) => {
+    let caIds: number[] = [];
+    if (req.member) {
+      const { data: cas } = await supabaseAdmin
+        .from('clinic_accounts')
+        .select('id')
+        .eq('tenant_id', req.tenant!.id)
+        .eq('member_user_id', req.member.user_id);
+      caIds = (cas ?? []).map(c => Number(c.id));
+    }
+
     const { data } = await (supabaseAdmin as any)
       .from('patient_records')
-      .select('id, upload_id, nome, cns, data_atendimento, cid10_codigo, medico_nome, status, error_message, created_at, clinic_accounts(tenant_id), uploads!inner(deleted_at)')
+      .select('id, upload_id, nome, cns, data_atendimento, clinic_account_id, cid10_codigo, medico_nome, status, error_message, created_at, clinic_accounts(tenant_id), uploads!inner(deleted_at, clinic_account_id, empresa_id, uploaded_by)')
       .is('uploads.deleted_at', null)
       .order('id', { ascending: false })
       .limit(500);
@@ -271,7 +304,27 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     // Filter programmatically since RLS or query structure handles tenant nesting
     const filtered = (data ?? []).filter((pr: any) => {
       // Legacy clinic account logic or via tenant if available
-      return pr.clinic_accounts ? pr.clinic_accounts.tenant_id === req.tenant!.id : true;
+      if (pr.clinic_accounts && pr.clinic_accounts.tenant_id !== req.tenant!.id) {
+        return false;
+      }
+
+      if (req.member) {
+        const prCaId = pr.clinic_account_id ? Number(pr.clinic_account_id) : null;
+        const upCaId = pr.uploads?.clinic_account_id ? Number(pr.uploads.clinic_account_id) : null;
+        
+        if (prCaId && caIds.includes(prCaId)) {
+          return true;
+        }
+        if (upCaId && caIds.includes(upCaId)) {
+          return true;
+        }
+        if (pr.uploads?.uploaded_by && pr.uploads.uploaded_by === req.member.user_id) {
+          return true;
+        }
+        return false;
+      }
+
+      return true;
     });
 
     return filtered;

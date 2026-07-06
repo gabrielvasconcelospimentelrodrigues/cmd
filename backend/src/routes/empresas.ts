@@ -124,11 +124,19 @@ export async function empresaRoutes(app: FastifyInstance): Promise<void> {
 
   // Empresas do assinante.
   app.get('/empresas', { preHandler: [app.authenticate] }, async (req) => {
-    const { data } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('empresas')
       .select('id, nome, cnpj, taxa_empresa, taxa_paga, terminais_contratados, created_at')
-      .eq('tenant_id', req.tenant!.id)
-      .order('id', { ascending: true });
+      .eq('tenant_id', req.tenant!.id);
+
+    if (req.member) {
+      if (req.member.empresa_id == null) {
+        return [];
+      }
+      query = query.eq('id', req.member.empresa_id);
+    }
+
+    const { data } = await query.order('id', { ascending: true });
     return data ?? [];
   });
 
@@ -195,5 +203,157 @@ export async function empresaRoutes(app: FastifyInstance): Promise<void> {
       meta: { empresa_id: id },
     });
     return { ok: true };
+  });
+
+  // ---- EQUIPE: membros da empresa (login e conta CMD próprios) — DONO apenas --
+
+  // Lista os membros de uma empresa (com flag de CMD já conectado).
+  app.get('/empresas/:id/membros', { preHandler: [app.authenticate] }, async (req, reply) => {
+    if (req.member) return reply.code(403).send({ error: 'Apenas o titular gerencia a equipe.' });
+    const empresaId = Number((req.params as { id: string }).id);
+    const { data: emp } = await supabaseAdmin.from('empresas').select('id').eq('id', empresaId).eq('tenant_id', req.tenant!.id).maybeSingle();
+    if (!emp) return reply.code(404).send({ error: 'empresa não encontrada.' });
+
+    const { data: membros } = await (supabaseAdmin as any)
+      .from('tenant_members')
+      .select('id, user_id, nome, email, role, created_at')
+      .eq('tenant_id', req.tenant!.id).eq('empresa_id', empresaId)
+      .order('created_at', { ascending: true });
+    const lista = (membros ?? []) as any[];
+
+    // Quem já conectou a própria conta CMD.
+    const conectados = new Set<string>();
+    if (lista.length) {
+      const { data: contas } = await supabaseAdmin
+        .from('clinic_accounts').select('member_user_id')
+        .in('member_user_id', lista.map((m) => m.user_id));
+      for (const c of contas ?? []) if ((c as any).member_user_id) conectados.add((c as any).member_user_id);
+    }
+    return lista.map((m) => ({ ...m, cmd_conectado: conectados.has(m.user_id) }));
+  });
+
+  // Cria um membro (login próprio) na empresa; reserva/contrata 1 terminal.
+  app.post('/empresas/:id/membros', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
+    if (req.member) return reply.code(403).send({ error: 'Apenas o titular gerencia a equipe.' });
+    const empresaId = Number((req.params as { id: string }).id);
+    const body = (req.body ?? {}) as { nome?: string; email?: string; senha?: string };
+    const email = (body.email ?? '').trim().toLowerCase();
+    const senha = body.senha ?? '';
+    if (!email || !senha) return reply.code(400).send({ error: 'e-mail e senha são obrigatórios.' });
+    if (senha.length < 6) return reply.code(400).send({ error: 'a senha deve ter ao menos 6 caracteres.' });
+
+    const { data: emp } = await supabaseAdmin.from('empresas').select('id, nome').eq('id', empresaId).eq('tenant_id', req.tenant!.id).maybeSingle();
+    if (!emp) return reply.code(404).send({ error: 'empresa não encontrada.' });
+
+    // Cria o usuário de auth (login próprio, já confirmado).
+    const { data: created, error: cErr } = await supabaseAdmin.auth.admin.createUser({
+      email, password: senha, email_confirm: true, user_metadata: { full_name: body.nome?.trim() || email },
+    });
+    if (cErr || !created?.user) {
+      const jaExiste = (cErr?.message ?? '').toLowerCase().includes('already') || (cErr as any)?.code === 'email_exists';
+      return reply.code(400).send({ error: jaExiste ? 'Já existe um usuário com esse e-mail.' : (cErr?.message || 'Falha ao criar o login do membro.') });
+    }
+    const userId = created.user.id;
+
+    const { data: membro, error: mErr } = await (supabaseAdmin as any)
+      .from('tenant_members')
+      .insert({ tenant_id: req.tenant!.id, empresa_id: empresaId, user_id: userId, nome: body.nome?.trim() || null, email })
+      .select('id, user_id, nome, email, role, created_at').single();
+    if (mErr || !membro) {
+      await supabaseAdmin.auth.admin.deleteUser(userId).catch(() => {}); // rollback do login
+      return reply.code(500).send({ error: 'Falha ao vincular o membro.' });
+    }
+
+    // Não designa terminal aqui: o membro usa os terminais LIVRES da empresa e o
+    // admin pode designar terminais específicos a ele (aba Configurações).
+
+    await registrarLog({
+      tenantId: req.tenant!.id, categoria: 'equipe', acao: 'membro.criado', nivel: 'sucesso', ator: ator(req),
+      descricao: `${atorNome(req)} adicionou ${email} à equipe de ${emp.nome}.`,
+      meta: { empresa_id: empresaId, user_id: userId },
+    });
+    return reply.code(201).send({ ...(membro as any), cmd_conectado: false });
+  });
+
+  // Remove um membro: apaga o login, o vínculo e os terminais dele.
+  app.delete('/membros/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
+    if (req.member) return reply.code(403).send({ error: 'Apenas o titular gerencia a equipe.' });
+    const id = Number((req.params as { id: string }).id);
+    const { data: m } = await (supabaseAdmin as any)
+      .from('tenant_members').select('id, user_id, email').eq('id', id).eq('tenant_id', req.tenant!.id).maybeSingle();
+    if (!m) return reply.code(404).send({ error: 'membro não encontrado.' });
+    await supabaseAdmin.from('clinic_accounts').delete().eq('tenant_id', req.tenant!.id).eq('member_user_id', (m as any).user_id);
+    await (supabaseAdmin as any).from('tenant_members').delete().eq('id', id).eq('tenant_id', req.tenant!.id);
+    await supabaseAdmin.auth.admin.deleteUser((m as any).user_id).catch(() => {});
+    await registrarLog({
+      tenantId: req.tenant!.id, categoria: 'equipe', acao: 'membro.removido', nivel: 'alerta', ator: ator(req),
+      descricao: `${atorNome(req)} removeu ${(m as any).email} da equipe.`,
+      meta: { user_id: (m as any).user_id },
+    });
+    return { ok: true };
+  });
+
+  // Remove uma empresa: desvincula terminais, membros, uploads, execuções e remove a empresa
+  app.delete('/empresas/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
+    if (req.member) return reply.code(403).send({ error: 'Apenas o titular pode excluir empresas.' });
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+
+    const { data: emp } = await supabaseAdmin
+      .from('empresas')
+      .select('id, nome, terminais_contratados')
+      .eq('id', id)
+      .eq('tenant_id', req.tenant!.id)
+      .maybeSingle();
+
+    if (!emp) return reply.code(404).send({ error: 'empresa não encontrada.' });
+
+    // Desvincula referências com segurança para evitar erros de FK
+    await Promise.all([
+      supabaseAdmin.from('clinic_accounts').update({ empresa_id: null }).eq('empresa_id', id).eq('tenant_id', req.tenant!.id),
+      supabaseAdmin.from('tenant_members').update({ empresa_id: null }).eq('empresa_id', id).eq('tenant_id', req.tenant!.id),
+      (supabaseAdmin as any).from('uploads').update({ empresa_id: null }).eq('empresa_id', id),
+      (supabaseAdmin as any).from('execucoes_automacao').update({ empresa_id: null }).eq('empresa_id', id),
+      (supabaseAdmin as any).from('faturas').update({ empresa_id: null }).eq('empresa_id', id).eq('tenant_id', req.tenant!.id),
+    ]);
+
+    const { error: delErr } = await supabaseAdmin
+      .from('empresas')
+      .delete()
+      .eq('id', id)
+      .eq('tenant_id', req.tenant!.id);
+
+    if (delErr) {
+      req.log.error(delErr);
+      return reply.code(500).send({ error: 'Falha ao excluir a empresa.' });
+    }
+
+    const terminaisExcluidos = Number(emp.terminais_contratados ?? 0);
+    if (terminaisExcluidos > 0) {
+      const { data: t } = await supabaseAdmin.from('tenants').select('max_terminais').eq('id', req.tenant!.id).maybeSingle();
+      if (t) {
+        const novoMax = Math.max(0, Number((t as any).max_terminais ?? 0) - terminaisExcluidos);
+        await (supabaseAdmin as any).from('tenants').update({ max_terminais: novoMax }).eq('id', req.tenant!.id);
+      }
+    }
+
+    await registrarLog({
+      tenantId: req.tenant!.id, categoria: 'empresa', acao: 'empresa.excluida', nivel: 'alerta', ator: ator(req),
+      descricao: `${atorNome(req)} excluiu a empresa ${emp.nome} (removidos ${terminaisExcluidos} terminal(is) contratado(s)).`,
+      meta: { empresa_id: id },
+    });
+
+    return { ok: true };
+  });
+
+  // Todos os membros do tenant (para designar terminais nas Configurações). Dono.
+  app.get('/equipe', { preHandler: [app.authenticate] }, async (req, reply) => {
+    if (req.member) return reply.code(403).send({ error: 'Apenas o titular gerencia a equipe.' });
+    const { data } = await (supabaseAdmin as any)
+      .from('tenant_members')
+      .select('id, user_id, nome, email, empresa_id, created_at')
+      .eq('tenant_id', req.tenant!.id)
+      .order('created_at', { ascending: true });
+    return data ?? [];
   });
 }

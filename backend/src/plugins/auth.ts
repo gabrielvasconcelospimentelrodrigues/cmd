@@ -1,7 +1,7 @@
 import fp from 'fastify-plugin';
 import type { FastifyInstance, FastifyReply, FastifyRequest, preHandlerHookHandler } from 'fastify';
 import { supabaseAdmin } from '../lib/supabase';
-import type { Tenant } from '../types/database';
+import type { Tenant, TenantMember } from '../types/database';
 
 /**
  * Autenticação via JWT do Supabase Auth.
@@ -15,6 +15,8 @@ declare module 'fastify' {
     authUser: { id: string; email: string | undefined; nome: string | undefined } | null;
     authRole: string | null;
     tenant: Tenant | null;
+    // Membro de equipe (quando o usuário logado é membro, não o dono). null = dono.
+    member: TenantMember | null;
   }
   interface FastifyInstance {
     authenticate: preHandlerHookHandler;
@@ -28,6 +30,7 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
   app.decorateRequest('authUser', null);
   app.decorateRequest('authRole', null);
   app.decorateRequest('tenant', null);
+  app.decorateRequest('member', null);
 
   // Verifica só o token e popula req.authUser. Não exige clínica.
   async function verifyUser(req: FastifyRequest, reply: FastifyReply): Promise<void> {
@@ -60,11 +63,26 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
     await verifyUser(req, reply);
     if (reply.sent) return;
 
-    const { data: tenant } = await supabaseAdmin
+    // 1) Tenta como DONO da clínica.
+    let { data: tenant } = await supabaseAdmin
       .from('tenants')
       .select('*')
       .eq('owner_user_id', req.authUser!.id)
       .maybeSingle();
+
+    // 2) Se não é dono, tenta como MEMBRO de equipe (login próprio).
+    if (!tenant) {
+      const { data: membro } = await supabaseAdmin
+        .from('tenant_members')
+        .select('*')
+        .eq('user_id', req.authUser!.id)
+        .maybeSingle();
+      if (membro) {
+        req.member = membro;
+        const { data: t } = await supabaseAdmin.from('tenants').select('*').eq('id', membro.tenant_id).maybeSingle();
+        tenant = t;
+      }
+    }
 
     if (!tenant) {
       await reply.code(403).send({ error: 'Usuário sem clínica associada.', code: 'NO_TENANT' });

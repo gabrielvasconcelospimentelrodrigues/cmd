@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Sliders, Shield, Pencil, Trash2, Plus, Wallet } from 'lucide-react';
-import { apiPatch, apiDelete, apiPost } from '../../lib/api';
+import { apiGet, apiPatch, apiDelete, apiPost } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
-import type { ClinicAccount, Tenant } from '../../lib/types';
+import type { ClinicAccount, Tenant, TenantMember } from '../../lib/types';
 import { Card, Switch } from './parts';
 import { Field, PasswordField } from '../../components/iacmd/ui';
 import type { ToastData } from '../../components/iacmd/ui';
@@ -10,9 +10,24 @@ import type { ToastData } from '../../components/iacmd/ui';
 const DIAS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
 const DELAYS = [{ label: 'Imediato', v: 0 }, { label: '1 minuto', v: 1 }, { label: '2 minutos', v: 2 }, { label: '1 hora', v: 60 }];
 
-export default function Config({ tenant, contas, empresas = [], onChange, showToast }: { tenant: Tenant | null; contas: ClinicAccount[]; empresas?: any[]; onChange: () => Promise<void>; showToast: (t: ToastData) => void }) {
+export default function Config({ tenant, contas, empresas = [], isMember = false, filtroMembro = '', onChange, showToast }: { tenant: Tenant | null; contas: ClinicAccount[]; empresas?: any[]; isMember?: boolean; filtroMembro?: string; onChange: () => Promise<void>; showToast: (t: ToastData) => void }) {
   const [tab, setTab] = useState<'controles' | 'custos' | 'seguranca'>('controles');
   const [novo, setNovo] = useState(false);
+  const [membros, setMembros] = useState<TenantMember[]>([]);
+
+  // Membros do tenant (para o dono designar terminais). Só o dono precisa.
+  useEffect(() => {
+    if (isMember) return;
+    void apiGet<TenantMember[]>('/equipe').then(setMembros).catch(() => setMembros([]));
+  }, [isMember, contas.length]);
+
+  // O filtro do HEADER (por operador) reflete aqui também:
+  //  - um MEMBRO selecionado → mostra os terminais designados a ele;
+  //  - Titular/Todos → mostra os terminais do ADMIN (livres), pra não ficar gigante.
+  const ehMembro = membros.some((m) => m.user_id === filtroMembro);
+  const contasVisiveis = ehMembro
+    ? contas.filter((c) => c.member_user_id === filtroMembro)
+    : contas.filter((c) => !c.member_user_id);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -24,11 +39,18 @@ export default function Config({ tenant, contas, empresas = [], onChange, showTo
 
       {tab === 'controles' && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between', flexWrap: 'wrap' }}>
+            <div style={{ color: 'var(--c-ink3)', fontSize: 13 }}>
+              {ehMembro ? 'Mostrando os terminais do membro selecionado no topo.' : 'Mostrando seus terminais. Use o filtro de operador no topo para ver o de um membro.'}
+            </div>
             <button onClick={() => setNovo(true)} className="ia-btn" style={{ padding: '11px 16px', fontSize: 14 }}><Plus size={16} /> Nova conta</button>
           </div>
-          {contas.length === 0 && <Card style={{ padding: 32, textAlign: 'center', color: 'var(--c-ink3)', fontSize: 14 }}>Nenhuma conta conectada.</Card>}
-          {contas.map((c) => <AccountCard key={c.id} conta={c} empresas={empresas} onChange={onChange} showToast={showToast} />)}
+          {contasVisiveis.length === 0 && (
+            <Card style={{ padding: 32, textAlign: 'center', color: 'var(--c-ink3)', fontSize: 14 }}>
+              {ehMembro ? 'Este membro não tem terminal designado. Designe um no card do terminal ou em Meu plano.' : 'Nenhum terminal livre. Use o filtro de operador no topo para ver o terminal de um membro.'}
+            </Card>
+          )}
+          {contasVisiveis.map((c) => <AccountCard key={c.id} conta={c} empresas={empresas} membros={membros} isMember={isMember} onChange={onChange} showToast={showToast} />)}
         </>
       )}
 
@@ -45,7 +67,7 @@ function TabBtn({ active, onClick, icon, children }: { active: boolean; onClick:
   return <button onClick={onClick} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '9px 16px', borderRadius: 10, border: '1px solid var(--c-border)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 14, fontWeight: 600, background: active ? 'var(--c-blued)' : 'var(--c-surface)', color: active ? '#fff' : 'var(--c-ink2)' }}>{icon}{children}</button>;
 }
 
-function AccountCard({ conta, empresas, onChange, showToast }: { conta: ClinicAccount; empresas: any[]; onChange: () => Promise<void>; showToast: (t: ToastData) => void }) {
+function AccountCard({ conta, empresas, membros = [], isMember = false, onChange, showToast }: { conta: ClinicAccount; empresas: any[]; membros?: TenantMember[]; isMember?: boolean; onChange: () => Promise<void>; showToast: (t: ToastData) => void }) {
   const [dias, setDias] = useState<number[]>(conta.dias_execucao ?? [0, 1, 2, 3, 4, 5, 6]);
   const [ini, setIni] = useState((conta.horario_inicio_execucao ?? '').slice(0, 5));
   const [fim, setFim] = useState((conta.horario_fim_execucao ?? '').slice(0, 5));
@@ -66,6 +88,16 @@ function AccountCard({ conta, empresas, onChange, showToast }: { conta: ClinicAc
     await apiPatch(`/clinic-accounts/${conta.id}`, { is_enabled: !conta.is_enabled });
     await onChange();
   };
+  // Designa este terminal a um membro (ou o deixa livre/compartilhado).
+  const designar = async (userId: string) => {
+    try {
+      await apiPatch(`/clinic-accounts/${conta.id}`, { member_user_id: userId || null });
+      await onChange();
+      showToast({ title: 'Terminal atualizado', msg: userId ? 'Designado ao membro.' : 'Terminal deixado livre (compartilhado).', kind: 'ok' });
+    } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); }
+  };
+  const membrosDaEmpresa = membros.filter((m) => !conta.empresa_id || !m.empresa_id || m.empresa_id === conta.empresa_id);
+
   const excluir = async () => {
     if (!confirm(`Excluir a conta "${conta.label}"?`)) return;
     await apiDelete(`/clinic-accounts/${conta.id}`);
@@ -109,7 +141,7 @@ function AccountCard({ conta, empresas, onChange, showToast }: { conta: ClinicAc
         </div>
       </div>
 
-      <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 20 }}>
+      <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20, marginTop: 20 }}>
         <div>
           <label className="ia-label">Empresa vinculada (terminal)</label>
           <select value={empresaId} onChange={(e) => setEmpresaId(Number(e.target.value) || '')} className="ia-input" style={{ width: '100%' }}>
@@ -118,6 +150,16 @@ function AccountCard({ conta, empresas, onChange, showToast }: { conta: ClinicAc
           </select>
           <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 5 }}>Associe o terminal a uma empresa para faturamento correto.</div>
         </div>
+        {!isMember && (
+          <div>
+            <label className="ia-label">Designação (equipe)</label>
+            <select value={conta.member_user_id ?? ''} onChange={(e) => void designar(e.target.value)} className="ia-input" style={{ width: '100%' }}>
+              <option value="">Livre — qualquer membro da empresa</option>
+              {membrosDaEmpresa.map((m) => <option key={m.user_id} value={m.user_id}>{m.nome || m.email}</option>)}
+            </select>
+            <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 5 }}>Designe este terminal a um membro (exclusivo) ou deixe livre (compartilhado).</div>
+          </div>
+        )}
         <div>
           <label className="ia-label">CID-10 padrão</label>
           <input

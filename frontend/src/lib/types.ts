@@ -30,13 +30,29 @@ export interface TerminalRequest {
 export interface Me {
   user: { id: string; email: string };
   tenant: Tenant;
+  // Preenchido quando o usuário logado é MEMBRO de equipe (não o titular).
+  member: TenantMember | null;
+}
+
+export interface TenantMember {
+  id: number;
+  tenant_id: number;
+  empresa_id: number | null;
+  user_id: string;
+  nome: string | null;
+  email: string;
+  role: string;
+  created_at: string;
+  cmd_conectado?: boolean; // se o membro já conectou a própria conta CMD
 }
 
 export interface ClinicAccount {
   id: number;
   label: string;
   cmd_username: string;
+  member_user_id: string | null;
   is_enabled: boolean;
+  busy_slots?: number[];
   empresa_id: number | null;
   cid_padrao: string;
   // Controles clínicos (perguntas do onboarding) — Terminologia é sempre CID-10.
@@ -57,6 +73,8 @@ export interface Upload {
   id: number;
   original_filename: string;
   status: string;
+  clinic_account_id: number | null;
+  uploaded_by: string | null;
   empresa_id: number | null;
   name: string;
   terminal_slot: number | null;
@@ -153,6 +171,9 @@ export interface Fatura {
 export interface Ficha {
   id: number;
   upload_id: number;
+  clinic_account_id: number | null;
+  // Nested do /patients (uploads!inner) — usado no filtro por membro/empresa.
+  uploads?: { empresa_id: number | null; uploaded_by: string | null; clinic_account_id?: number | null } | null;
   nome: string;
   cns: string;
   data_atendimento: string | null;

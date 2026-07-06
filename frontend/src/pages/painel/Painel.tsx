@@ -39,7 +39,6 @@ export default function Painel() {
   const [toast, showToast] = useToast();
   const [perfilAberto, setPerfilAberto] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [empresaSel, setEmpresaSel] = useState<string>(''); // seletor de empresa (demonstrativo)
   const [page, setPageInternal] = useState<Page>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('cmd_active_page') as Page;
@@ -58,6 +57,10 @@ export default function Painel() {
   };
 
   const [tenant, setTenant] = useState<Me['tenant'] | null>(null);
+  const [isMember, setIsMember] = useState(false); // membro de equipe (acesso restrito)
+  const [filtroMembro, setFiltroMembro] = useState<string>(''); // filtro por membro/operador
+  const [filtroEmpresa, setFiltroEmpresa] = useState<string>(''); // filtro por empresa
+  const [membros, setMembros] = useState<{ user_id: string; nome: string | null; email: string; empresa_id?: number | null }[]>([]);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [patients, setPatients] = useState<Ficha[]>([]);
   const [contas, setContas] = useState<ClinicAccount[]>([]);
@@ -79,14 +82,46 @@ export default function Painel() {
       apiGet<ClinicAccount[]>('/clinic-accounts'),
       apiGet<any[]>('/empresas').catch(() => [])
     ]);
-    setTenant(me.tenant); setUploads(u); setPatients(p); setContas(c); setEmpresas(e);
+    setTenant(me.tenant); setIsMember(!!me.member); setUploads(u); setPatients(p); setContas(c); setEmpresas(e);
   }, []);
   useEffect(() => { void carregar(); }, [carregar]);
   useEffect(() => { const t = setInterval(() => void carregar().catch(() => {}), 2000); return () => clearInterval(t); }, [carregar]);
+  useEffect(() => { if (isMember && ['planos', 'config'].includes(page)) setPage('painel'); }, [isMember, page]);
+  useEffect(() => { if (!isMember) void apiGet<any[]>('/equipe').then(setMembros).catch(() => setMembros([])); }, [isMember, contas.length]);
 
-  const pendCount = patients.filter((p) => p.status === 'error' || p.status === 'needs_review').length;
-  const runningUploads = uploads.filter((u) => ['registering', 'extracting'].includes(u.status));
-  const running = runningUploads.length > 0;
+  // ---- FILTRO por membro/empresa (dono): aplica a fichas, pendências e dashboard ----
+  const uploadsView = uploads.filter((u) => {
+    if (empresas.length > 1 && filtroEmpresa) {
+      if (String(u.empresa_id ?? '') !== filtroEmpresa) return false;
+    }
+    if (filtroMembro) {
+      const ca = contas.find((c) => c.id === u.clinic_account_id);
+      const matchesCreator = u.uploaded_by === filtroMembro;
+      const matchesTerminal = ca?.member_user_id === filtroMembro;
+      if (!matchesCreator && !matchesTerminal) return false;
+    }
+    return true;
+  });
+
+  const patientsView = patients.filter((p) => {
+    if (empresas.length > 1 && filtroEmpresa) {
+      if (String(p.uploads?.empresa_id ?? '') !== filtroEmpresa) return false;
+    }
+    if (filtroMembro) {
+      const ca = contas.find((c) => c.id === p.clinic_account_id);
+      const matchesCreator = p.uploads?.uploaded_by === filtroMembro;
+      const matchesTerminal = ca?.member_user_id === filtroMembro;
+      if (!matchesCreator && !matchesTerminal) return false;
+    }
+    return true;
+  });
+
+  const pendCount = patientsView.filter((p) => p.status === 'error' || p.status === 'needs_review').length;
+  // Reflete o filtro do header: sidebar "Em execução" e status "IA ativa" mostram
+  // o terminal selecionado (ou todos, se sem filtro) — ao vivo como se estivesse na conta.
+  const runningUploads = uploadsView.filter((u) => ['registering', 'extracting'].includes(u.status));
+  const showRealTime = filtroMembro !== '' && runningUploads.length > 0;
+  const running = showRealTime;
 
   return (
     <div className="iacmd ia-shell" data-theme={theme} data-menu={menuOpen ? 'open' : 'closed'} style={{ display: 'grid', gridTemplateColumns: '244px 1fr', height: '100vh', overflow: 'hidden' }}>
@@ -94,7 +129,7 @@ export default function Painel() {
       <aside style={{ display: 'flex', flexDirection: 'column', background: 'var(--c-side)', borderRight: '1px solid var(--c-side-border)', overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '18px' }}><LogoMark size={34} /><span style={{ color: 'var(--c-side-ink)', fontWeight: 700, fontSize: 18 }}>IA-CMD</span></div>
         <nav style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {NAV.map(({ key, label, icon: Icon }) => {
+          {NAV.filter((n) => !(isMember && (n.key === 'planos' || n.key === 'config'))).map(({ key, label, icon: Icon }) => {
             const active = page === key;
             return (
               <button key={key} onClick={() => { setPage(key); setMenuOpen(false); }} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px', borderRadius: 10, border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', fontSize: 14, fontWeight: active ? 600 : 500, color: active ? 'var(--c-side-active-ink)' : 'var(--c-side-ink2)', background: active ? 'var(--c-side-active-bg)' : 'transparent' }}>
@@ -104,7 +139,7 @@ export default function Painel() {
             );
           })}
         </nav>
-        {runningUploads.length > 0 && (
+        {showRealTime && (
           <div style={{ borderTop: '1px solid var(--c-side-border)', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '12px 16px 6px', flexShrink: 0 }}>
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--c-cyan)', animation: 'ia-pulse 1.5s infinite' }} />
@@ -132,14 +167,41 @@ export default function Painel() {
           </div>
 
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-            {/* Seletor de empresa (demonstrativo por enquanto) — alinhado à direita */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--c-surface2)', border: '1px solid var(--c-border)', borderRadius: 10, padding: '0 4px 0 10px', height: 40, minWidth: 0, maxWidth: 240, flexShrink: 1 }}>
-              <Building2 size={16} style={{ color: 'var(--c-softfg)', flex: 'none' }} />
-              <select value={empresaSel} onChange={(e) => setEmpresaSel(e.target.value)} title="Empresa em foco" style={{ appearance: 'none', WebkitAppearance: 'none', border: 'none', background: 'transparent', color: 'var(--c-ink)', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', outline: 'none', padding: '0 24px 0 0', minWidth: 0, textOverflow: 'ellipsis', backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237A89A6' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E\")", backgroundRepeat: 'no-repeat', backgroundPosition: 'right center' }}>
-                <option value="">Todas as empresas</option>
-                {empresas.map((e) => <option key={e.id} value={String(e.id)}>{e.nome}</option>)}
-              </select>
-            </div>
+            {/* Filtro por TERMINAL / MEMBRO (dono) — aplica a fichas, pendências e dashboard */}
+            {/* Filtro por Membro (Operador) */}
+            {!isMember && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: filtroMembro ? 'var(--c-soft)' : 'var(--c-surface2)', border: `1px solid ${filtroMembro ? 'var(--c-blue)' : 'var(--c-border)'}`, borderRadius: 10, padding: '0 4px 0 10px', height: 40, minWidth: 0, maxWidth: 280, flexShrink: 1 }}>
+                <Users size={16} style={{ color: 'var(--c-softfg)', flex: 'none' }} />
+                <select value={filtroMembro} onChange={(e) => setFiltroMembro(e.target.value)} title="Filtrar por operador" style={{ appearance: 'none', WebkitAppearance: 'none', border: 'none', background: 'transparent', color: 'var(--c-ink)', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', outline: 'none', padding: '0 24px 0 0', minWidth: 0, textOverflow: 'ellipsis', backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237A89A6' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E\")", backgroundRepeat: 'no-repeat', backgroundPosition: 'right center' }}>
+                  <option value="">Todos os operadores</option>
+                  {session?.user?.id && (
+                    <option value={session.user.id}>
+                      {(session.user.user_metadata as any)?.full_name || 'Assinante / Titular'} (Assinante)
+                    </option>
+                  )}
+                  {membros.map((m) => (
+                    <option key={m.user_id} value={m.user_id}>
+                      {m.nome || m.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Filtro por Empresa (só aparece se houver mais de uma empresa cadastrada) */}
+            {!isMember && empresas.length > 1 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: filtroEmpresa ? 'var(--c-soft)' : 'var(--c-surface2)', border: `1px solid ${filtroEmpresa ? 'var(--c-blue)' : 'var(--c-border)'}`, borderRadius: 10, padding: '0 4px 0 10px', height: 40, minWidth: 0, maxWidth: 280, flexShrink: 1 }}>
+                <Building2 size={16} style={{ color: 'var(--c-softfg)', flex: 'none' }} />
+                <select value={filtroEmpresa} onChange={(e) => setFiltroEmpresa(e.target.value)} title="Filtrar por empresa" style={{ appearance: 'none', WebkitAppearance: 'none', border: 'none', background: 'transparent', color: 'var(--c-ink)', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', outline: 'none', padding: '0 24px 0 0', minWidth: 0, textOverflow: 'ellipsis', backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237A89A6' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E\")", backgroundRepeat: 'no-repeat', backgroundPosition: 'right center' }}>
+                  <option value="">Todas as empresas</option>
+                  {empresas.map((emp) => (
+                    <option key={emp.id} value={String(emp.id)}>
+                      {emp.nome}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 13px', borderRadius: 999, fontSize: 13, fontWeight: 600, color: running ? 'var(--c-okfg)' : 'var(--c-ink3)', background: running ? 'var(--c-oksoft)' : 'var(--c-surface2)', border: '1px solid var(--c-border)' }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: running ? 'var(--c-ok)' : 'var(--c-ink3)' }} />
               {running ? 'IA ativa' : 'IA ociosa'}
@@ -150,19 +212,38 @@ export default function Painel() {
         </div>
         <div className="ia-main-pad" style={{ maxWidth: page === 'painel' && runningUploads.length > 0 ? '100%' : 1180, margin: '0 auto', padding: 28, animation: 'ia-slide .25s ease' }}>
           <div style={{ display: page === 'painel' ? 'block' : 'none' }}>
-            <Home tenant={tenant} uploads={uploads} patients={patients} empresas={empresas} onEnviar={() => setPage('enviar')} onChange={carregar} showToast={showToast} />
+            <Home
+              tenant={tenant}
+              uploads={uploadsView}
+              patients={patientsView}
+              empresas={empresas}
+              contas={contas}
+              filtroMembro={filtroMembro}
+              filtroEmpresa={filtroEmpresa}
+              onEnviar={() => setPage('enviar')}
+              onChange={carregar}
+              showToast={showToast}
+            />
           </div>
           <div style={{ display: page === 'enviar' ? 'block' : 'none' }}>
-            <Enviar empresas={empresas} uploads={uploads} onChange={carregar} showToast={showToast} />
+            <Enviar empresas={empresas} uploads={uploadsView} contas={contas} isMember={isMember} onChange={carregar} showToast={showToast} />
           </div>
           <div style={{ display: page === 'pendencias' ? 'block' : 'none' }}>
-            <Pendencias patients={patients} onChange={carregar} showToast={showToast} />
+            <Pendencias patients={patientsView} onChange={carregar} showToast={showToast} />
           </div>
           <div style={{ display: page === 'planos' ? 'block' : 'none' }}>
-            <Planos tenant={tenant} onChange={carregar} showToast={showToast} />
+            <Planos
+              tenant={tenant}
+              contas={contas}
+              membros={membros}
+              ownerId={session?.user?.id}
+              ownerName={(session?.user?.user_metadata as any)?.full_name || 'Titular'}
+              onChange={carregar}
+              showToast={showToast}
+            />
           </div>
           <div style={{ display: page === 'config' ? 'block' : 'none' }}>
-            <Config tenant={tenant} contas={contas} empresas={empresas} onChange={carregar} showToast={showToast} />
+            <Config tenant={tenant} contas={contas} empresas={empresas} isMember={isMember} filtroMembro={filtroMembro} onChange={carregar} showToast={showToast} />
           </div>
         </div>
       </main>
@@ -174,7 +255,7 @@ export default function Painel() {
 const navFoot: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '9px 6px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--c-side-ink2)', fontSize: 14, fontFamily: 'inherit', cursor: 'pointer' };
 
 /* ============ PAINEL (home) ============ */
-function Home({ tenant, uploads, patients, empresas = [], onEnviar, onChange, showToast }: { tenant: Me['tenant'] | null; uploads: Upload[]; patients: Ficha[]; empresas?: { id: number; nome: string; terminais_contratados?: number }[]; onEnviar: () => void; onChange: () => Promise<void>; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void }) {
+function Home({ tenant, uploads, patients, empresas = [], contas = [], filtroMembro = '', filtroEmpresa = '', onEnviar, onChange, showToast }: { tenant: Me['tenant'] | null; uploads: Upload[]; patients: Ficha[]; empresas?: { id: number; nome: string; terminais_contratados?: number }[]; contas?: ClinicAccount[]; filtroMembro?: string; filtroEmpresa?: string; onEnviar: () => void; onChange: () => Promise<void>; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void }) {
   const [robo, setRobo] = useState(false);
   const [modalUpload, setModalUpload] = useState<Upload | null>(null);
   const [hoverBar, setHoverBar] = useState<number | null>(null);
@@ -194,15 +275,20 @@ function Home({ tenant, uploads, patients, empresas = [], onEnviar, onChange, sh
   const [ecoSem, setEcoSem] = useState<EconomiaResp | null>(null);
   useEffect(() => {
     const inicio = new Date(Date.now() - 7 * 864e5).toISOString();
+    const queryParts: string[] = [];
+    if (filtroMembro) queryParts.push(`member_user_id=${filtroMembro}`);
+    if (empresas.length > 1 && filtroEmpresa) queryParts.push(`empresa_id=${filtroEmpresa}`);
+    const qStr = queryParts.join('&');
+ 
     const puxar = () => {
-      apiGet<EconomiaResp>('/economia').then(setEco).catch(() => {});
-      apiGet<EconomiaResp>(`/economia?inicio=${encodeURIComponent(inicio)}`).then(setEcoSem).catch(() => {});
-      apiGet<StatsResp>('/stats').then(setStats).catch(() => {});
+      apiGet<EconomiaResp>(`/economia?${qStr}`).then(setEco).catch(() => {});
+      apiGet<EconomiaResp>(`/economia?inicio=${encodeURIComponent(inicio)}${qStr ? '&' + qStr : ''}`).then(setEcoSem).catch(() => {});
+      apiGet<StatsResp>(`/stats?${qStr}`).then(setStats).catch(() => {});
     };
     puxar();
     const t = setInterval(puxar, 4000);
     return () => clearInterval(t);
-  }, []);
+  }, [filtroMembro, filtroEmpresa, empresas.length]);
   const custoMin = eco?.custo_minuto ?? custo / (176 * 60);
   const ecoTotal = { valor: eco ? eco.valor_economizado : economia(reg, custo).valor };
   const ecoSemana = { valor: ecoSem ? ecoSem.valor_economizado : economia(regSemana, custo).valor };
@@ -228,9 +314,11 @@ function Home({ tenant, uploads, patients, empresas = [], onEnviar, onChange, sh
   // Capacidade diária da equipe manual = funcionários × cadastros/dia (real).
   const capManualDia = (stats?.funcionarios_operacao ?? 0) * (stats?.cadastros_dia_por_funcionario ?? 0);
 
+  const showRealTime = filtroMembro !== '' && runningUploads.length > 0;
+ 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {runningUploads.length > 0 ? (
+      {showRealTime ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: 18 }}>
           {/* Agente */}
           <Card style={{ padding: 24, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', alignSelf: 'start', minHeight: 400 }}>
@@ -353,7 +441,7 @@ function Home({ tenant, uploads, patients, empresas = [], onEnviar, onChange, sh
       </Card>
 
       {/* Envios recentes */}
-      <EnviosRecentes empresas={empresas} uploads={uploads} onChange={onChange} showToast={showToast} simple />
+      <EnviosRecentes empresas={empresas} uploads={uploads} contas={contas} onChange={onChange} showToast={showToast} simple />
       {robo && modalUpload && <RoboAoVivoModal upload={modalUpload} onClose={() => { setRobo(false); setModalUpload(null); }} />}
     </div>
   );
@@ -395,12 +483,13 @@ function AreaChart({ points, labels }: { points: number[]; labels: string[] }) {
 }
 
 /* ============ ENVIAR FICHA ============ */
-function Enviar({ empresas, uploads, onChange, showToast }: { empresas: any[]; uploads: Upload[]; onChange: () => Promise<void>; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void }) {
+function Enviar({ empresas, uploads, contas = [], isMember, onChange, showToast }: { empresas: any[]; uploads: Upload[]; contas?: ClinicAccount[]; isMember: boolean; onChange: () => Promise<void>; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void }) {
   const [empresaId, setEmpresaId] = useState<number | ''>('');
   const [nomeLista, setNomeLista] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [fileKey, setFileKey] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [selectTerminalForUpload, setSelectTerminalForUpload] = useState<Upload | null>(null);
 
   const importar = async () => {
     if (!empresaId || !file) return showToast({ title: 'Faltam dados', msg: 'Escolha a empresa e o arquivo.', kind: 'err' });
@@ -410,11 +499,27 @@ function Enviar({ empresas, uploads, onChange, showToast }: { empresas: any[]; u
       form.append('empresa_id', String(empresaId));
       form.append('name', nomeLista.trim());
       form.append('file', file);
-      await apiUpload('/uploads', form);
+      const upload = await apiUpload<Upload>('/uploads', form);
       setFile(null); setFileKey((k) => k + 1); setNomeLista('');
       await onChange();
-      showToast({ title: 'Enviado para a IA', msg: 'As fichas entraram na fila de extração.', kind: 'ok' });
+      
+      if (isMember) {
+        setSelectTerminalForUpload(upload);
+      } else {
+        showToast({ title: 'Enviado para a IA', msg: 'As fichas entraram na fila de extração.', kind: 'ok' });
+      }
     } catch (e) { showToast({ title: 'Falha no envio', msg: (e as Error).message, kind: 'err' }); } finally { setBusy(false); }
+  };
+
+  const confirmarInicio = async (u: Upload, slot: number) => {
+    setSelectTerminalForUpload(null);
+    try {
+      await apiPost(`/uploads/${u.id}/iniciar`, { terminal_slot: slot });
+      await onChange();
+      showToast({ title: 'Terminal selecionado', msg: `A automação usará o Terminal ${slot}.`, kind: 'ok' });
+    } catch (e) {
+      showToast({ title: 'Falha ao iniciar', msg: (e as Error).message, kind: 'err' });
+    }
   };
 
   return (
@@ -441,13 +546,45 @@ function Enviar({ empresas, uploads, onChange, showToast }: { empresas: any[]; u
           <button onClick={importar} disabled={busy} className="ia-btn" style={{ height: 42, padding: '0 22px', fontSize: 14 }}><FileSpreadsheet size={16} /> {busy ? 'Importando…' : 'Importar'}</button>
         </div>
       </Card>
-      <EnviosRecentes empresas={empresas} uploads={uploads} onChange={onChange} showToast={showToast} />
+      <EnviosRecentes empresas={empresas} uploads={uploads} contas={contas} onChange={onChange} showToast={showToast} />
+
+      {selectTerminalForUpload && (() => {
+        const u = selectTerminalForUpload;
+        const emp = empresas.find((e) => e.id === u.empresa_id);
+        const n = Math.max(1, Number(emp?.terminais_contratados ?? 1));
+        const ca = contas.find((c) => c.empresa_id === u.empresa_id);
+        const ocupados = new Set(ca?.busy_slots ?? []);
+        const livres = Array.from({ length: n }, (_, i) => i + 1).filter((k) => !ocupados.has(k));
+        return (
+          <div onClick={() => setSelectTerminalForUpload(null)} style={{ position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(7,11,22,.62)', backdropFilter: 'blur(3px)', display: 'grid', placeItems: 'center', padding: 20 }}>
+            <div onClick={(e) => e.stopPropagation()} className="ia-card" style={{ width: 440, maxWidth: '100%', padding: 26 }}>
+              <h3 style={{ color: 'var(--c-ink)', fontSize: 18, fontWeight: 700, margin: 0 }}>Em qual terminal rodar?</h3>
+              <p style={{ color: 'var(--c-ink3)', fontSize: 13, margin: '6px 0 4px' }}>Empresa</p>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'var(--c-soft)', color: 'var(--c-softfg)', padding: '6px 12px', borderRadius: 8, fontWeight: 700, fontSize: 14 }}><Building2 size={15} /> {emp?.nome ?? 'Empresa'}</div>
+              <p style={{ color: 'var(--c-ink3)', fontSize: 12, margin: '14px 0 8px' }}>Terminais livres ({livres.length} de {n}) — rodam em paralelo:</p>
+              {livres.length === 0 ? (
+                <div style={{ padding: '20px 8px', textAlign: 'center', color: 'var(--c-warnfg)', fontSize: 13, background: 'var(--c-warnsoft)', borderRadius: 10 }}>Todos os {n} terminais estão ocupados agora. Aguarde um liberar.</div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', gap: 10 }}>
+                  {livres.map((k) => (
+                    <button key={k} onClick={() => confirmarInicio(u, k)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '14px 8px', borderRadius: 12, border: '1px solid var(--c-blue)', background: 'var(--c-soft)', color: 'var(--c-softfg)', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, fontSize: 14 }}>
+                      <Cpu size={18} /> Terminal {k}
+                      <span style={{ fontSize: 10, fontWeight: 500 }}>livre</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button onClick={() => setSelectTerminalForUpload(null)} className="ia-btn-outline" style={{ width: '100%', marginTop: 18 }}>Cancelar</button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
 
 /* ============ ENVIOS RECENTES ============ */
-function EnviosRecentes({ empresas = [], uploads, onChange, showToast, simple, onIniciar }: { empresas?: { id: number; nome: string; terminais_contratados?: number }[]; uploads: Upload[]; onChange: () => Promise<void>; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void; simple?: boolean; onIniciar?: (u: Upload) => void }) {
+function EnviosRecentes({ empresas = [], uploads, contas = [], onChange, showToast, simple, onIniciar }: { empresas?: { id: number; nome: string; terminais_contratados?: number }[]; uploads: Upload[]; contas?: ClinicAccount[]; onChange: () => Promise<void>; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void; simple?: boolean; onIniciar?: (u: Upload) => void }) {
   const [ver, setVer] = useState<Upload | null>(null);
   const [live, setLive] = useState<Upload | null>(null);
   const [pararAlvo, setPararAlvo] = useState<Upload | null>(null);
@@ -550,7 +687,8 @@ function EnviosRecentes({ empresas = [], uploads, onChange, showToast, simple, o
         const u = selectTerminalForUpload;
         const emp = empresas.find((e) => e.id === u.empresa_id);
         const n = Math.max(1, Number(emp?.terminais_contratados ?? 1));
-        const ocupados = new Set(uploads.filter((x) => x.empresa_id === u.empresa_id && ['registering', 'extracting'].includes(x.status) && x.terminal_slot).map((x) => x.terminal_slot as number));
+        const ca = contas.find((c) => c.empresa_id === u.empresa_id);
+        const ocupados = new Set(ca?.busy_slots ?? []);
         const livres = Array.from({ length: n }, (_, i) => i + 1).filter((k) => !ocupados.has(k));
         return (
         <div onClick={() => setSelectTerminalForUpload(null)} style={{ position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(7,11,22,.62)', backdropFilter: 'blur(3px)', display: 'grid', placeItems: 'center', padding: 20 }}>
