@@ -8,6 +8,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import Onboarding from './pages/Onboarding';
+import MfaGate from './pages/MfaGate';
 import PendingApproval from './pages/PendingApproval';
 import Painel from './pages/painel/Painel';
 import SuperAdmin from './pages/SuperAdmin';
@@ -65,7 +66,7 @@ function AuthedApp() {
 }
 
 export default function App() {
-  const { session, loading } = useAuth();
+  const { session, loading, needsMfa } = useAuth();
   const location = useLocation();
 
   useEffect(() => {
@@ -89,6 +90,9 @@ export default function App() {
       </Routes>
     );
   }
+
+  // Conta com 2FA ativado só entra após o desafio (AAL2). Vale p/ qualquer papel.
+  if (needsMfa) return <MfaGate />;
 
   // Super admin não passa por onboarding — vai direto ao painel de liberação.
   const role = (session.user.app_metadata as { role?: string } | undefined)?.role;

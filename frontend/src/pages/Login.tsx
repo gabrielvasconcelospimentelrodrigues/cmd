@@ -15,22 +15,10 @@ export default function Login() {
   const [pass, setPass] = useState('');
   const [touched, setTouched] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [mfa, setMfa] = useState<{ factorId: string } | null>(null); // etapa do 2FA
-  const [codigo, setCodigo] = useState('');
   const emailBad = !emailRe.test(email);
 
-  // Após a senha, verifica se a conta exige 2FA (aal2). Se sim, mostra o
-  // campo do código; senão, entra direto.
-  const seguirAposSenha = async (): Promise<void> => {
-    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-    if (aal && aal.nextLevel === 'aal2' && aal.currentLevel !== 'aal2') {
-      const { data: fs } = await supabase.auth.mfa.listFactors();
-      const totp = (fs?.totp ?? []).find((f) => f.status === 'verified');
-      if (totp) { setMfa({ factorId: totp.id }); return; }
-    }
-    nav('/');
-  };
-
+  // Só faz a senha. Se a conta tiver 2FA, o App mostra o desafio (MfaGate)
+  // automaticamente ao detectar AAL1 → AAL2; senão, cai direto no painel.
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setTouched(true);
@@ -38,21 +26,9 @@ export default function Login() {
     setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
     if (error) { setLoading(false); return showToast({ title: 'Não foi possível entrar', msg: error.message, kind: 'err' }); }
-    await seguirAposSenha();
+    // Sucesso: o AuthProvider atualiza a sessão e o App decide (MfaGate ou painel).
     setLoading(false);
   };
-
-  const verificarMfa = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (codigo.length !== 6 || !mfa) return;
-    setLoading(true);
-    const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId: mfa.factorId, code: codigo });
-    setLoading(false);
-    if (error) return showToast({ title: 'Código inválido', msg: error.message, kind: 'err' });
-    nav('/');
-  };
-
-  const cancelarMfa = async () => { await supabase.auth.signOut(); setMfa(null); setCodigo(''); setPass(''); };
 
   return (
     <div className="iacmd ia-login-split" data-theme={theme}>
@@ -108,17 +84,6 @@ export default function Login() {
 
         {/* Centro do Formulário */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, padding: '40px 0' }}>
-          {mfa ? (
-            <form onSubmit={verificarMfa} className="ia-card" style={{ width: 420, maxWidth: '100%', padding: '36px 32px', animation: 'ia-slide .25s ease', boxShadow: 'none', border: 'none', background: 'transparent' }}>
-              <h1 style={{ color: 'var(--c-ink)', fontSize: 24, fontWeight: 700, letterSpacing: '-.02em', margin: 0 }}>Verificação em duas etapas</h1>
-              <p style={{ color: 'var(--c-ink3)', fontSize: 14, margin: '8px 0 0' }}>Digite o código de 6 dígitos do seu app autenticador.</p>
-              <input autoFocus value={codigo} onChange={(e) => setCodigo(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" className="ia-input ia-mono" style={{ marginTop: 22, fontSize: 24, letterSpacing: '.4em', textAlign: 'center' }} />
-              <button className="ia-btn" style={{ width: '100%', marginTop: 20 }} disabled={loading || codigo.length !== 6}>{loading ? 'Verificando…' : 'Confirmar'}</button>
-              <div style={{ textAlign: 'center', marginTop: 16 }}>
-                <button type="button" onClick={cancelarMfa} className="ia-link" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13 }}>Voltar</button>
-              </div>
-            </form>
-          ) : (
             <form onSubmit={submit} className="ia-card" style={{ width: 420, maxWidth: '100%', padding: '36px 32px', animation: 'ia-slide .25s ease', boxShadow: 'none', border: 'none', background: 'transparent' }}>
               <h1 style={{ color: 'var(--c-ink)', fontSize: 28, fontWeight: 700, letterSpacing: '-.02em', margin: 0 }}>Entrar na IA-CMD</h1>
               <p style={{ color: 'var(--c-ink3)', fontSize: 14, margin: '8px 0 0' }}>Acesse o painel da sua operação.</p>
@@ -142,7 +107,6 @@ export default function Login() {
                 Ainda não tem conta? <Link to="/registro" className="ia-link">Criar conta</Link>
               </div>
             </form>
-          )}
         </div>
 
         {/* Rodapé do Formulário */}
