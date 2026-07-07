@@ -8,7 +8,10 @@ services:
     # appendonly: persiste a fila em disco (não perde jobs em restart).
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction
     ports:
-      - '6379:6379'
+      # SÓ localhost — NUNCA expor o Redis na internet (evita sequestro/replica
+      # maliciosa: um Redis 6379 aberto sem senha pode ser transformado em réplica
+      # de um atacante via SLAVEOF, quebrando as filas e vazando dados).
+      - '127.0.0.1:6379:6379'
     volumes:
       - cmd-redis-data:/data
     restart: unless-stopped
