@@ -160,7 +160,9 @@ export class WebAutomator {
     try {
       this.cdp = await this.context.newCDPSession(this.page);
       this.cdp.on('Page.screencastFrame', async (frame: { data: string; sessionId: number }) => {
-        connection.publish(`live:${this.opts.uploadId}`, frame.data).catch(() => {});
+        connection.publish(`live:${this.opts.uploadId}`, frame.data).catch((err) => {
+          console.error('[screencast] erro ao publicar no Redis:', err);
+        });
         try {
           await this.cdp?.send('Page.screencastFrameAck', { sessionId: frame.sessionId });
         } catch {
@@ -168,7 +170,8 @@ export class WebAutomator {
         }
       });
       await this.cdp.send('Page.startScreencast', { format: 'jpeg', quality: 55, everyNthFrame: 1 });
-    } catch {
+    } catch (e) {
+      console.error('[screencast] erro ao iniciar:', e);
       this.cdp = null;
     }
   }

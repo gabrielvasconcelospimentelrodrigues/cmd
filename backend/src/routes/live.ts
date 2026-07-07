@@ -72,5 +72,10 @@ export async function liveRoutes(app: FastifyInstance): Promise<void> {
     };
     req.raw.on('close', encerrar);
     req.raw.on('error', encerrar);
+
+    // Mantém a rota ativa enquanto o cliente estiver conectado
+    await new Promise<void>((resolve) => {
+      req.raw.on('close', () => resolve());
+    });
   });
 }
