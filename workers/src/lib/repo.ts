@@ -63,6 +63,7 @@ export async function inserirPacientes(
     data_atendimento: string | null;
     cid10_codigo: string;
     medico_nome: string;
+    modalidade?: 'oci' | 'catarata';
     extraction_method: Record<string, string>;
     campos_incertos: string[];
     status: 'ok' | 'needs_review';
@@ -78,6 +79,7 @@ export async function inserirPacientes(
     data_atendimento: p.data_atendimento,
     cid10_codigo: p.cid10_codigo,
     medico_nome: p.medico_nome,
+    modalidade: p.modalidade ?? 'oci',
     extraction_method: p.extraction_method,
     campos_incertos: p.campos_incertos,
     // 'ok' -> pronto para registrar; 'needs_review' -> revisão manual antes.
@@ -97,13 +99,14 @@ export interface PendentePaciente {
   data_atendimento: string | null;
   cid10_codigo: string;
   medico_nome: string;
+  modalidade: 'oci' | 'catarata' | null;
   automation_overrides: Record<string, string> | null;
 }
 
 export async function listarPendentes(uploadId: number): Promise<PendentePaciente[]> {
   const { data } = await supabaseAdmin
     .from('patient_records')
-    .select('id, nome, cns, data_nascimento, data_atendimento, cid10_codigo, medico_nome, automation_overrides')
+    .select('id, nome, cns, data_nascimento, data_atendimento, cid10_codigo, medico_nome, modalidade, automation_overrides')
     .eq('upload_id', uploadId)
     .eq('status', 'pending_registration')
     .order('id', { ascending: true });

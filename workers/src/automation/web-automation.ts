@@ -113,7 +113,13 @@ export interface PatientData {
   cid10Codigo: string;
   medicoNome: string;
   overrides?: Record<string, string>;
+  /** Modalidade do cadastro: 'oci' (padrão — pacote de consultas por idade) ou
+   * 'catarata' (FACOEMULSIFICAÇÃO: sem checkbox OCI e procedimento único). */
+  modalidade?: 'oci' | 'catarata';
 }
+
+/** Código SIGTAP da FACOEMULSIFICAÇÃO com implante de lente intra-ocular dobrável. */
+const CODIGO_CATARATA_FACO = '0405050372';
 
 export interface AutomatorOpts {
   username: string;
@@ -901,20 +907,27 @@ export class WebAutomator {
 
     await this.autocompleteComOverride(overrides, 'modalidade_assistencial', 'modalidadeAssistencial', '07', 'Ambulatorial Especializada');
 
-    // Oferta de cuidado integrado (OCI). Garante que nenhum dropdown aberto
-    // (ex.: da Modalidade) esteja interceptando o clique antes de marcar.
-    await this.fecharOverlayAutocomplete();
-    const ociChk = page.locator('ion-checkbox[formcontrolname="oci"]').first();
-    try {
-      await ociChk.click({ timeout: 8000 });
-    } catch {
-      await ociChk.click({ timeout: 5000, force: true });
-    }
-    try {
-      await page.getByRole('button', { name: 'SIM', exact: true }).click({ timeout: 4000 });
-      await page.waitForTimeout(1000);
-    } catch {
-      /* sem modal de confirmação de OCI */
+    // Oferta de Cuidado Integrado (OCI): SÓ marca para a modalidade OCI. Na
+    // modalidade CATARATA (FACO), o checkbox NÃO é marcado — resto do fluxo igual.
+    if (patient.modalidade !== 'catarata') {
+      // Garante que nenhum dropdown aberto (ex.: da Modalidade) esteja
+      // interceptando o clique antes de marcar.
+      await this.fecharOverlayAutocomplete();
+      const ociChk = page.locator('ion-checkbox[formcontrolname="oci"]').first();
+      try {
+        await ociChk.click({ timeout: 8000 });
+      } catch {
+        await ociChk.click({ timeout: 5000, force: true });
+      }
+      try {
+        await page.getByRole('button', { name: 'SIM', exact: true }).click({ timeout: 4000 });
+        await page.waitForTimeout(1000);
+      } catch {
+        /* sem modal de confirmação de OCI */
+      }
+    } else {
+      this.passo('Modalidade CATARATA (FACO) — sem OCI.');
+      await this.fecharOverlayAutocomplete();
     }
 
     await this.autocompleteComOverride(overrides, 'procedencia', 'procedencia', '12', 'Demanda Referenciada');
@@ -952,7 +965,11 @@ export class WebAutomator {
     const procedimentoOverride = this.valorOverride(overrides, 'procedimento_realizado');
     if (procedimentoOverride) {
       await this.registrarProcedimento(null, patient, overrides, procedimentoOverride);
+    } else if (patient.modalidade === 'catarata') {
+      // CATARATA: um único procedimento — a FACOEMULSIFICAÇÃO (0405050372).
+      await this.registrarProcedimento(null, patient, overrides, CODIGO_CATARATA_FACO);
     } else {
+      // OCI (padrão): pacote de procedimentos por idade.
       const codigos = this.calculateProcedureCodes(patient.dataNascimento, patient.dataAtendimento);
       for (const idx of codigos) await this.registrarProcedimento(idx, patient, overrides);
     }

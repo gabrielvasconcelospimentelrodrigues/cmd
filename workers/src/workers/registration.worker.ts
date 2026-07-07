@@ -194,6 +194,8 @@ export function startRegistrationWorker(): Worker<UploadJob> {
                 cid10Codigo: (p.cid10_codigo && p.cid10_codigo.trim()) ? p.cid10_codigo : (conta.cid_padrao || ''),
                 medicoNome: p.medico_nome,
                 overrides: p.automation_overrides ?? {},
+                // Modalidade: 'catarata' (FACO) ou 'oci' (padrão).
+                modalidade: p.modalidade === 'catarata' ? 'catarata' : 'oci',
               };
               // DEDUP: se este CNS+data já foi cadastrado nesta conta (outra
               // lista/retomada), NÃO cadastra de novo — manda para Pendências

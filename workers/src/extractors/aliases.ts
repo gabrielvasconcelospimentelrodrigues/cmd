@@ -24,6 +24,7 @@ export const ALIASES_COLUNA: Record<string, readonly string[]> = {
     'data de realizacao do procedimento',
   ],
   cid10_codigo: ['cid-10', 'cid 10', 'cid10', 'cid', 'problema', 'diagnostico', 'problema/diagnostico'],
+  modalidade: ['modalidade', 'tipo', 'tipo de cadastro', 'tipo cadastro', 'cirurgia', 'catarata', 'oci', 'tipo procedimento', 'tipo de procedimento', 'modalidade cadastro'],
   medico_nome: [
     'profissional executante', 'medico', 'médico', 'profissional',
     'nome do medico', 'nome do profissional', 'medico executante',

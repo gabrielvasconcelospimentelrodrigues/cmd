@@ -7,7 +7,7 @@ import { ALIASES_COLUNA, normalize, parseData } from './aliases';
 import { lerCsv, lerExcel, lerXml } from './readers';
 
 /** Campos de destino do import mapeado (medico_nome lá == "profissional" aqui). */
-export const CAMPOS_IMPORTACAO = ['nome', 'cns', 'data_nascimento', 'profissional', 'data_atendimento'] as const;
+export const CAMPOS_IMPORTACAO = ['nome', 'cns', 'data_nascimento', 'profissional', 'data_atendimento', 'modalidade'] as const;
 export type CampoImportacao = (typeof CAMPOS_IMPORTACAO)[number];
 
 const ALIASES_MAPEADO: Record<CampoImportacao, readonly string[]> = {
@@ -16,6 +16,7 @@ const ALIASES_MAPEADO: Record<CampoImportacao, readonly string[]> = {
   data_nascimento: ALIASES_COLUNA.data_nascimento!,
   profissional: ALIASES_COLUNA.medico_nome!,
   data_atendimento: ALIASES_COLUNA.data_atendimento!,
+  modalidade: ALIASES_COLUNA.modalidade!,
 };
 
 /** Linha importada (datas já em 'YYYY-MM-DD' | null). */
@@ -25,6 +26,7 @@ export interface LinhaImportada {
   data_nascimento: string | null;
   profissional: string;
   data_atendimento: string | null;
+  modalidade: string;
 }
 
 const ehXml = (f: string) => f.toLowerCase().endsWith('.xml');
@@ -94,6 +96,7 @@ export async function importarComMapa(
       data_nascimento: parseData(get('data_nascimento')),
       profissional: get('profissional'),
       data_atendimento: parseData(get('data_atendimento')),
+      modalidade: get('modalidade'),
     };
   });
 }

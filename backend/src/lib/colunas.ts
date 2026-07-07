@@ -8,12 +8,13 @@ import { XMLParser } from 'fast-xml-parser';
 import ExcelJS from 'exceljs';
 
 /** Campos de destino do import mapeado (os que o worker/importarComMapa espera). */
-export const CAMPOS_IMPORTACAO = ['cns', 'data_atendimento', 'profissional', 'nome', 'data_nascimento'] as const;
+export const CAMPOS_IMPORTACAO = ['cns', 'data_atendimento', 'profissional', 'nome', 'data_nascimento', 'modalidade'] as const;
 export type CampoImportacao = (typeof CAMPOS_IMPORTACAO)[number];
 /** Obrigatórios para o cadastro (sem eles cai em Pendências). */
 export const CAMPOS_OBRIGATORIOS: CampoImportacao[] = ['cns', 'data_atendimento', 'profissional'];
 
 const ALIASES: Record<CampoImportacao, string[]> = {
+  modalidade: ['modalidade', 'tipo', 'tipo de cadastro', 'tipo cadastro', 'cirurgia', 'catarata', 'oci', 'tipo procedimento', 'tipo de procedimento', 'modalidade cadastro'],
   nome: ['nome', 'nome completo', 'nome do paciente', 'paciente'],
   cns: [
     'cns', 'cartao nacional de saude', 'numero do cns', 'cns do paciente',

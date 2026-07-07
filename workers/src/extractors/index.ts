@@ -9,6 +9,13 @@ import type { PatientData } from './types';
  *  - XML sem mapa não é suportado (precisa de mapeamento manual).
  * Sempre devolve PatientData[] (contrato comum).
  */
+/** Normaliza o texto da coluna de modalidade para 'catarata' (se contiver
+ * "catarata"/"faco") ou 'oci' (padrão para qualquer outro valor/vazio). */
+function normalizarModalidade(raw: string | null | undefined): 'oci' | 'catarata' {
+  const s = String(raw ?? '').toLowerCase();
+  return (s.includes('catarata') || s.includes('faco')) ? 'catarata' : 'oci';
+}
+
 export async function extrairPacientes(
   buffer: Buffer,
   filename: string,
@@ -36,6 +43,7 @@ export async function extrairPacientes(
         data_atendimento: l.data_atendimento,
         cid10_codigo: '',
         medico_nome: l.profissional,
+        modalidade: normalizarModalidade(l.modalidade),
         extraction_method,
         campos_incertos,
         status: campos_incertos.length ? 'needs_review' : 'ok',

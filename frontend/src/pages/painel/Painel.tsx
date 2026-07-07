@@ -494,6 +494,7 @@ const CAMPOS_MAP: { key: string; label: string }[] = [
   { key: 'profissional', label: 'Médico / Profissional' },
   { key: 'nome', label: 'Nome do paciente' },
   { key: 'data_nascimento', label: 'Data de nascimento' },
+  { key: 'modalidade', label: 'Modalidade (Catarata/OCI)' },
 ];
 
 function MapeamentoModal({ colunas, obrigatorios, mapa, setMapa, busy, onCancel, onConfirm }: { colunas: string[]; obrigatorios: string[]; mapa: Record<string, string>; setMapa: (m: Record<string, string>) => void; busy: boolean; onCancel: () => void; onConfirm: () => void }) {

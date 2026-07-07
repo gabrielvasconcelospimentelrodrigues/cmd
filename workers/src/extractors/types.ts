@@ -12,6 +12,8 @@ export interface PatientData {
   data_atendimento: string | null;
   cid10_codigo: string;
   medico_nome: string;
+  /** Modalidade do cadastro: 'oci' (padrão) ou 'catarata' (FACO). */
+  modalidade?: 'oci' | 'catarata';
   /** Qual método extraiu cada campo fundamental (aqui sempre "planilha"). */
   extraction_method: Record<string, string>;
   /** Campos fundamentais ainda vazios — vão para revisão manual. */
