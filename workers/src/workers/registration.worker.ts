@@ -7,7 +7,6 @@ import {
 } from '../lib/repo';
 import { proximaJanelaPermitida } from '../scheduling';
 import { withLock } from '../lib/lock';
-import { comMutex } from '../lib/mutex';
 import { decrypt } from '../lib/crypto';
 import { WebAutomator, ProfessionalNotFoundError, type PatientData } from '../automation/web-automation';
 import { getMotorConfig, MOTOR_CONFIG_PADRAO } from '../lib/motor-config';
@@ -54,6 +53,9 @@ export function startRegistrationWorker(): Worker<UploadJob> {
       const stInicial = await statusDoUpload(uploadId);
       if (stInicial === 'parado' || stInicial === 'paused') {
         await logEntry(uploadId, 'INFO', 'Envio está parado/pausado — job ignorado.');
+        // Normaliza status "zumbi" (ficou 'registering' após deleção/parada no
+        // meio) para não aparecer como rodando/invisível no painel.
+        await setUploadStatus(uploadId, stInicial, { current_step: '' });
         return;
       }
 
@@ -115,7 +117,7 @@ export function startRegistrationWorker(): Worker<UploadJob> {
         if (automacaoSimulada) {
           await logEntry(uploadId, 'INFO', `[SIMULAÇÃO] Iniciando cadastro de ${pendentes.length} paciente(s) (demonstração — cadastro real depende do motor + conta gov.br ativa).`);
           for (const p of pendentes) {
-            if (await pausouOuParou(uploadId)) { await logEntry(uploadId, 'WARN', 'Interrompido pelo usuário.'); return 'parado'; }
+            if (await pausouOuParou(uploadId)) { await logEntry(uploadId, 'WARN', 'Interrompido pelo usuário.'); const real = await statusDoUpload(uploadId); await setUploadStatus(uploadId, real === 'paused' ? 'paused' : 'parado', { current_step: '' }); return 'parado'; }
             await setUploadStatus(uploadId, 'registering', { current_step: `Cadastrando ${p.nome || 'paciente'}...` });
             await sleep(700 + Math.floor(Math.random() * 500));
             if (Math.random() > 0.08) {
@@ -147,9 +149,7 @@ export function startRegistrationWorker(): Worker<UploadJob> {
           try {
             await automator.start();
             try {
-              // Serializa o LOGIN por conta gov (mesmo TOTP não pode ser usado
-              // por vários logins simultâneos). O cadastro depois segue paralelo.
-              await comMutex(`login:${conta.cmd_username}`, () => comTimeout(automator.login(), loginTimeoutMs, 'login'));
+              await comTimeout(automator.login(), loginTimeoutMs, 'login');
             } catch (e) {
               await logEntry(uploadId, 'WARN', `⚠ Automação ${(e as Error).message} no login. Pausando e retomando em 30s de onde parou (${registered} já cadastrado(s)).`);
               precisaRetomar = true;
@@ -157,7 +157,7 @@ export function startRegistrationWorker(): Worker<UploadJob> {
 
             for (const p of pendentes) {
               if (precisaRetomar) break;
-              if (await pausouOuParou(uploadId)) { await logEntry(uploadId, 'WARN', 'Interrompido pelo usuário.'); return 'parado'; }
+              if (await pausouOuParou(uploadId)) { await logEntry(uploadId, 'WARN', 'Interrompido pelo usuário.'); const real = await statusDoUpload(uploadId); await setUploadStatus(uploadId, real === 'paused' ? 'paused' : 'parado', { current_step: '' }); return 'parado'; }
               const pd: PatientData = {
                 cns: p.cns,
                 nome: p.nome,
