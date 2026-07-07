@@ -849,7 +849,10 @@ export class WebAutomator {
       await page.locator('#cpfSearch').click();
       const naoEncontrado = page.getByText('não encontrado', { exact: false });
       const dataNascCampo = page.locator('ion-input[formcontrolname="dataNascimento"] input');
-      for (let i = 0; i < 20; i++) {
+      // Aguarda até 40s pelo retorno do CADSUS (data de nascimento) ou "não
+      // encontrado". O CADSUS às vezes demora; esperar pouco (era 2s) fazia o
+      // robô seguir ANTES do paciente carregar → o form de admissão não abria.
+      for (let i = 0; i < 400; i++) {
         if ((await naoEncontrado.count()) > 0) break;
         if ((await dataNascCampo.count()) > 0 && (await dataNascCampo.inputValue())) break;
         await page.waitForTimeout(100);
