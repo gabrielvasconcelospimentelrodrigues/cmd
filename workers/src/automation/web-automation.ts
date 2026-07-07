@@ -439,14 +439,38 @@ export class WebAutomator {
   async recuperarParaContatos(): Promise<void> {
     const page = this.page;
     if (!page) return;
+    const listoNaLista = () =>
+      page.getByRole('button', { name: 'Incluir contato assistencial' }).first()
+        .isVisible({ timeout: 2500 }).catch(() => false);
+
+    // Já está na lista? nada a fazer.
+    if (await listoNaLista()) return;
+
+    // 1) Fecha overlays/dropdowns/modais que interceptam cliques (dropdown de
+    //    autocomplete aberto, modal "deseja sair", etc.).
+    for (let i = 0; i < 3; i++) { await page.keyboard.press('Escape').catch(() => {}); await page.waitForTimeout(200); }
+    await this.fecharOverlayAutocomplete().catch(() => {});
+    await this.dispensarModalSair();
+
+    // 2) Tenta o caminho normal: clicar no menu "Contatos Assistenciais".
     try {
+      await page.getByText('Contatos Assistenciais', { exact: true }).first().click({ timeout: 8000 });
+      await page.waitForTimeout(1200);
       await this.dispensarModalSair();
-      await page.getByText('Contatos Assistenciais', { exact: true }).first().click({ timeout: 10_000 });
+    } catch { /* segue para o fallback */ }
+    if (await listoNaLista()) return;
+
+    // 3) Fallback FORTE: navega direto para a home do CMD (reseta qualquer
+    //    formulário meio-aberto) — sem depender de menu clicável. Isso evita a
+    //    cascata em que um cadastro travado derruba todos os próximos.
+    try {
+      await page.goto('https://cmd-coleta.saude.gov.br/#/home', { timeout: 20_000 }).catch(() => {});
       await page.waitForTimeout(1500);
-      // O clique no menu pode ter aberto outro modal de saída (form aberto).
       await this.dispensarModalSair();
+      await page.getByText('Contatos Assistenciais', { exact: true }).first().click({ timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(1200);
     } catch {
-      /* melhor esforço — o retry/relogin externo cobre se não recuperar */
+      /* melhor esforço — o retry/relogin externo cobre se ainda não recuperar */
     }
   }
 
