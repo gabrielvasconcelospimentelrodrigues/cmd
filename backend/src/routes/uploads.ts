@@ -200,7 +200,20 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(500).send({ error: 'Falha ao criar o upload.' });
     }
 
-    await extractionQueue().add('extrair', { uploadId: upload.id });
+    // Se a fila estiver indisponível, NÃO deixa um "listing" órfão no painel:
+    // desfaz o upload recém-criado (soft-delete + remove o arquivo) e devolve
+    // erro claro. Assim, reimportar não acumula duplicatas fantasmas.
+    try {
+      await extractionQueue().add('extrair', { uploadId: upload.id });
+    } catch (e) {
+      req.log.error(e);
+      await (supabaseAdmin as any)
+        .from('uploads')
+        .update({ deleted_at: new Date().toISOString(), status: 'parado' })
+        .eq('id', upload.id);
+      await supabaseAdmin.storage.from(BUCKET).remove([storagePath]).catch(() => {});
+      return reply.code(503).send({ error: 'A fila de processamento está indisponível. Tente novamente em instantes.' });
+    }
     return reply.code(201).send(upload);
   });
 
