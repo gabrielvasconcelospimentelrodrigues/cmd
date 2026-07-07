@@ -568,17 +568,37 @@ export class WebAutomator {
     if (await this.confirmarAlterarProcedimento()) {
       await inputBox.click({ timeout: 10_000 }).catch(() => {});
     }
-    // Digitação caractere a caractere — alguns campos buscam no servidor por keystroke.
-    await inputBox.pressSequentially(searchText, { delay: 100 });
+    // Digita e seleciona a sugestão. O servidor do gov às vezes DEMORA a
+    // retornar as opções (ex.: "Procedimento Realizado") — se esperar pouco, o
+    // campo fica VAZIO (vermelho) e trava o cadastro. Então: espera até ~12s
+    // pela sugestão, REDIGITA se não vier, e confirma que o campo foi preenchido.
     const sugestao = container.getByText(optionTextContains, { exact: false }).first();
-    for (let i = 0; i < 25; i++) {
-      if ((await sugestao.count()) > 0) break;
-      await page.waitForTimeout(100);
+    let selecionado = false;
+    for (let tent = 0; tent < 3 && !selecionado; tent++) {
+      if (tent > 0) {
+        // limpa e redigita
+        await inputBox.click({ timeout: 8000 }).catch(() => {});
+        await inputBox.press('Control+a').catch(() => {});
+        await inputBox.press('Delete').catch(() => {});
+        await page.waitForTimeout(300);
+      }
+      await inputBox.pressSequentially(searchText, { delay: 100 });
+      // espera a sugestão aparecer (servidor lento) — até ~12s.
+      let apareceu = false;
+      for (let i = 0; i < 120; i++) {
+        if ((await sugestao.count().catch(() => 0)) > 0) { apareceu = true; break; }
+        await page.waitForTimeout(100);
+      }
+      if (!apareceu) continue; // não veio: tenta redigitar
+      await sugestao.click({ timeout: 5000 }).catch(() => {});
+      // confirma que o campo ficou preenchido de fato
+      for (let i = 0; i < 20; i++) {
+        if (await inputBox.inputValue().catch(() => '')) { selecionado = true; break; }
+        await page.waitForTimeout(100);
+      }
     }
-    await sugestao.click({ timeout: 10_000 });
-    for (let i = 0; i < 10; i++) {
-      if (await inputBox.inputValue()) break;
-      await page.waitForTimeout(50);
+    if (!selecionado) {
+      throw new Error(`Não foi possível selecionar "${optionTextContains}" em ${formcontrolname} — sugestão não apareceu (servidor do gov lento).`);
     }
     await this.fecharOverlayAutocomplete();
     await page.waitForTimeout(200);
