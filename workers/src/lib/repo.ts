@@ -131,44 +131,18 @@ export async function jaCadastrado(clinicAccountId: number, cns: string, dataAte
  * repete dentro da própria lista. Os duplicados vão para PENDÊNCIAS
  * (needs_review) para tratamento manual. Retorna quantos foram marcados. */
 export async function marcarDuplicados(uploadId: number, tenantId: number): Promise<number> {
-  const { data: pend } = await supabaseAdmin
-    .from('patient_records')
-    .select('id, cns, data_atendimento')
-    .eq('upload_id', uploadId)
-    .eq('status', 'pending_registration')
-    .order('id', { ascending: true });
-  const pendentes = (pend ?? []) as { id: number; cns: string | null; data_atendimento: string | null }[];
-  if (pendentes.length === 0) return 0;
-
-  const { data: cas } = await supabaseAdmin.from('clinic_accounts').select('id').eq('tenant_id', tenantId);
-  const caIds = (cas ?? []).map((c) => c.id);
-  const jaCad = new Set<string>();
-  if (caIds.length > 0) {
-    const { data: reg } = await supabaseAdmin
-      .from('patient_records')
-      .select('cns, data_atendimento')
-      .in('clinic_account_id', caIds)
-      .in('status', ['registered', 'verified_ok', 'verified_divergent', 'done_manually']);
-    for (const r of (reg ?? []) as { cns: string | null; data_atendimento: string | null }[]) {
-      if (r.cns && r.data_atendimento) jaCad.add(`${r.cns}|${r.data_atendimento}`);
-    }
+  // Dedup no BANCO (função marcar_duplicados_upload): mesmo CNS + data já
+  // cadastrado no tenant, ou repetido na própria lista. Uma query só — rápido
+  // e completo (o caminho antigo em JS baixava tudo e travava no limite de 1000).
+  const { data, error } = await (supabaseAdmin as any).rpc('marcar_duplicados_upload', {
+    p_upload_id: uploadId,
+    p_tenant_id: tenantId,
+  });
+  if (error) {
+    console.error('[marcarDuplicados] rpc falhou:', error.message);
+    return 0;
   }
-
-  const vistos = new Set<string>();
-  const dupIds: number[] = [];
-  for (const p of pendentes) {
-    if (!p.cns || !p.data_atendimento) continue;
-    const chave = `${p.cns}|${p.data_atendimento}`;
-    if (jaCad.has(chave) || vistos.has(chave)) dupIds.push(p.id);
-    else vistos.add(chave);
-  }
-  if (dupIds.length > 0) {
-    await supabaseAdmin
-      .from('patient_records')
-      .update({ status: 'needs_review', error_message: 'Cadastro duplicado — mesmo CNS já cadastrado nesta data de atendimento.' })
-      .in('id', dupIds);
-  }
-  return dupIds.length;
+  return Number(data ?? 0);
 }
 
 /** Atualiza o status de um paciente (e marca registered_at quando cadastrado). */
