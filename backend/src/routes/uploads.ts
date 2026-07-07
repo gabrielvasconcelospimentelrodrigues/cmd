@@ -466,14 +466,14 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true, atualizadas: (data ?? []).length };
   });
 
-  // ---- Excluir um envio (soft-delete) --------------------------------------
+  // ---- Excluir um envio (HARD DELETE: apaga de verdade do banco) ------------
   app.delete('/uploads/:id', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
 
     const { data: up } = await (supabaseAdmin as any)
       .from('uploads')
-      .select('id, clinic_accounts(tenant_id), empresas(tenant_id)')
+      .select('id, file_path, clinic_accounts(tenant_id), empresas(tenant_id)')
       .eq('id', id)
       .maybeSingle();
 
@@ -481,9 +481,22 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     const isOwner = (up as any).clinic_accounts?.tenant_id === req.tenant!.id || (up as any).empresas?.tenant_id === req.tenant!.id;
     if (!isOwner) return reply.code(404).send({ error: 'envio não encontrado.' });
 
-    // Excluir também PARA a automação: deleted_at já é tratado como 'parado'
-    // pelo motor; marcamos o status junto para o estado ficar explícito.
+    // 1) Marca parado + deleted_at PRIMEIRO — se a automação estiver rodando,
+    //    ela aborta na próxima checagem (não fica fantasma escrevendo em linha
+    //    que vai sumir).
     await (supabaseAdmin as any).from('uploads').update({ deleted_at: new Date().toISOString(), status: 'parado', sessao_iniciada_em: null }).eq('id', id);
+
+    // 2) Apaga DE VERDADE do banco, filhos antes do pai (FKs: execucoes_automacao,
+    //    log_entries, patient_records → uploads).
+    await supabaseAdmin.from('execucoes_automacao').delete().eq('upload_id', id);
+    await supabaseAdmin.from('log_entries').delete().eq('upload_id', id);
+    await supabaseAdmin.from('patient_records').delete().eq('upload_id', id);
+    await supabaseAdmin.from('uploads').delete().eq('id', id);
+
+    // 3) Remove o arquivo do Storage (melhor esforço).
+    const filePath = (up as any).file_path as string | null;
+    if (filePath) await supabaseAdmin.storage.from(BUCKET).remove([filePath]).catch(() => {});
+
     return reply.code(204).send();
   });
 
