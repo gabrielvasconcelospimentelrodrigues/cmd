@@ -867,7 +867,19 @@ export class WebAutomator {
     this.passo('Preenchendo dados de admissão...');
     const dataAdmissaoStr = this.valorOverride(overrides, 'data_admissao') || dataAtendimentoStr;
     T('vai PREENCHER dataAdmissao');
-    await page.locator('ion-input[formcontrolname="dataAdmissao"] input').fill(dataAdmissaoStr);
+    const admInput = page.locator('ion-input[formcontrolname="dataAdmissao"] input');
+    // Espera o campo aparecer. Se NÃO aparecer, fotografa a tela (diagnóstico) e
+    // tenta reconfirmar o "Sim" da etapa anterior (a admissão pode não ter aberto).
+    let admOk = await admInput.waitFor({ state: 'visible', timeout: 10_000 }).then(() => true).catch(() => false);
+    if (!admOk) {
+      await this.capturarDebug(`sem_admissao_${cns}`).catch(() => {});
+      T('dataAdmissao NÃO apareceu — reconfirma Próximo/Sim');
+      await page.getByRole('button', { name: 'Sim' }).last().click({ timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(1500);
+      admOk = await admInput.waitFor({ state: 'visible', timeout: 15_000 }).then(() => true).catch(() => false);
+    }
+    if (!admOk) throw new Error('Formulário de admissão não abriu (campo Data de Admissão não apareceu) — CNS pode não ter carregado.');
+    await admInput.fill(dataAdmissaoStr);
     T('dataAdmissao PREENCHIDA ok');
     await page.waitForTimeout(2000);
     await this.aguardarModalCarregamento(1500);
