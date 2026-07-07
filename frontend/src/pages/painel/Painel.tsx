@@ -120,7 +120,8 @@ export default function Painel() {
   // Reflete o filtro do header: sidebar "Em execução" e status "IA ativa" mostram
   // o terminal selecionado (ou todos, se sem filtro) — ao vivo como se estivesse na conta.
   const runningUploads = uploadsView.filter((u) => ['registering', 'extracting'].includes(u.status));
-  const showRealTime = filtroMembro !== '' && runningUploads.length > 0;
+  // Mostra o ao vivo SEMPRE que houver automação rodando (o filtro só narrow-a a lista).
+  const showRealTime = runningUploads.length > 0;
   const running = showRealTime;
 
   return (
@@ -314,7 +315,7 @@ function Home({ tenant, uploads, patients, empresas = [], contas = [], filtroMem
   // Capacidade diária da equipe manual = funcionários × cadastros/dia (real).
   const capManualDia = (stats?.funcionarios_operacao ?? 0) * (stats?.cadastros_dia_por_funcionario ?? 0);
 
-  const showRealTime = filtroMembro !== '' && runningUploads.length > 0;
+  const showRealTime = runningUploads.length > 0; // ao vivo sempre que houver automação rodando
  
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
