@@ -14,7 +14,7 @@ export const MOTOR_CONFIG_PADRAO: MotorConfig = {
   registration_concurrency: 4,
   extraction_concurrency: 2,
   max_rondas_retry: 3,
-  login_timeout_segundos: 150,
+  login_timeout_segundos: 330, // ⚠️ PROVISÓRIO: comporta o laço de 5 min login→contatos (voltar p/ 150 ao desativar a regra)
   cadastro_timeout_segundos: 360,
   watchdog_interval_minutos: 5,
   automacao_simulada: true

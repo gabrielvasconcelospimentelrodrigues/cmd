@@ -1966,7 +1966,7 @@ function Infra() {
   }, []);
 
   const dolarTaxa = 5.5;
-  const custoFixoUsd = 18; // API Droplet real cost
+  const custoFixoUsd = 48; // API Droplet real cost
   const custoFixo = custoFixoUsd * dolarTaxa;
   const custoVpsPorTerminal = 0; // Terminais rodam sob a mesma infraestrutura, custo extra por terminal = R$ 0
 
@@ -2087,9 +2087,9 @@ function Infra() {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 4 }}>
             <div style={{ borderLeft: '3px solid #3B82F6', paddingLeft: 12, background: 'var(--c-oksoft)', borderRadius: 8, padding: 8 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--c-okfg)' }}>Fase 1: Droplet Atual ($18/mês - 2GB RAM, 1 CPU Intel Premium)</div>
-              <div style={{ fontSize: 12, color: 'var(--c-ink2)', marginTop: 4 }}>
-                Suporta até <strong>100 robôs em segundo plano</strong> ou <strong>15 telas ao vivo simultâneas</strong>. (Seu ambiente real atual).
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--c-okfg)' }}>Fase 1: Droplet Atual ($48/mês - 8GB RAM, 4 CPUs)</div>
+              <div style={{ fontSize: 12, color: 'var(--c-okfg)', marginTop: 4 }}>
+                Suporta até <strong>500 robôs em segundo plano</strong> ou <strong>75 telas ao vivo simultâneas</strong>. (Seu ambiente real atual).
               </div>
             </div>
 
