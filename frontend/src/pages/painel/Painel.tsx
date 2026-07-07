@@ -86,7 +86,9 @@ export default function Painel() {
     setTenant(me.tenant); setIsMember(!!me.member); setUploads(u); setPatients(p); setContas(c); setEmpresas(e);
   }, []);
   useEffect(() => { void carregar(); }, [carregar]);
-  useEffect(() => { const t = setInterval(() => void carregar().catch(() => {}), 2000); return () => clearInterval(t); }, [carregar]);
+  // 6s (era 2s): reduz MUITO o egress do Supabase (a cada ciclo busca uploads +
+  // TODOS os patients + contas + empresas). 6s é responsivo o bastante.
+  useEffect(() => { const t = setInterval(() => void carregar().catch(() => {}), 6000); return () => clearInterval(t); }, [carregar]);
   useEffect(() => { if (isMember && ['planos', 'config'].includes(page)) setPage('painel'); }, [isMember, page]);
   useEffect(() => { if (!isMember) void apiGet<any[]>('/equipe').then(setMembros).catch(() => setMembros([])); }, [isMember, contas.length]);
 
@@ -289,7 +291,7 @@ function Home({ tenant, uploads, patients, empresas = [], contas = [], filtroMem
       apiGet<StatsResp>(`/stats?${qStr}`).then(setStats).catch(() => {});
     };
     puxar();
-    const t = setInterval(puxar, 4000);
+    const t = setInterval(puxar, 15000); // 15s (era 4s): estatísticas não mudam tão rápido — economiza egress
     return () => clearInterval(t);
   }, [filtroMembro, filtroEmpresa, empresas.length]);
   const custoMin = eco?.custo_minuto ?? custo / (176 * 60);

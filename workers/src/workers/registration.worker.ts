@@ -138,12 +138,25 @@ export function startRegistrationWorker(): Worker<UploadJob> {
         } else {
           // Automação REAL (Playwright). Cadastro por paciente ainda em port.
           await logEntry(uploadId, 'INFO', `Logando no CMD-COLETA como ${conta.cmd_username}...`);
+          // ECONOMIA DE EGRESS (Supabase): o robô emite dezenas de passos por
+          // paciente; gravar todos = MUITAS escritas. Estrangula para no máximo
+          // 1 escrita a cada ~2,5s (só quando o texto muda). O UI continua fluido.
+          let ultimoStepMs = 0;
+          let ultimoStepTxt = '';
+          const onStepThrottled = (d: string) => {
+            if (d === ultimoStepTxt) return;
+            const agora = Date.now();
+            if (agora - ultimoStepMs < 2500) return;
+            ultimoStepMs = agora;
+            ultimoStepTxt = d;
+            void setUploadStatus(uploadId, 'registering', { current_step: d });
+          };
           const automator = new WebAutomator({
             username: conta.cmd_username,
             password: decrypt(conta.cmd_password_encrypted),
             mfaSecret: decrypt(conta.mfa_secret_encrypted),
             uploadId,
-            onStep: (d) => void setUploadStatus(uploadId, 'registering', { current_step: d }),
+            onStep: onStepThrottled,
             // Corta o login no meio se o usuário parou/pausou/excluiu (sem fantasma).
             abortou: () => pausouOuParou(uploadId),
             // CID por idade (controles): 0–8 anos vs 9+ (fallback H53 dentro do motor).
