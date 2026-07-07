@@ -549,6 +549,7 @@ export class WebAutomator {
       else await alerta.getByRole('button', { name: 'Sim', exact: true }).click({ timeout: 3000 }).catch(() => {});
       await page.waitForTimeout(500);
       tratou = true;
+      console.log(`[TRACE proc] alerta "alterar procedimento" CONFIRMADA (Sim) #${i + 1}`);
     }
     return tratou;
   }
@@ -772,25 +773,34 @@ export class WebAutomator {
     await page.waitForTimeout(300);
     await this.aguardarModalCarregamento(1500);
 
+    const T = (m: string) => console.log(`[TRACE proc ${codigo}] ${m}`);
+    T('data ok → financiamento');
     await this.autocompleteComOverride(overrides, 'financiamento', 'financiamento', '01', 'Sistema', 'app-procedimento');
+    T('financiamento ok → terminologia');
     await this.autocompleteComOverride(overrides, 'terminologia_procedimento', 'terminologia', 'Tabela SUS', 'Tabela SUS', 'app-procedimento');
+    T('terminologia ok → PROCEDIMENTO');
     await this.selecionarNgAutocomplete('procedimentoRealizado', codigo, descricao, 'app-procedimento');
+    T('PROCEDIMENTO ok → quantidade');
     const quantidade = this.valorOverride(overrides, 'quantidade') || '1';
     await page.locator('input[formcontrolname="quantidade"]').fill(quantidade);
 
     const codAutorizacao = this.valorOverride(overrides, 'codigo_autorizacao');
     if (codAutorizacao) await page.locator('input[formcontrolname="codigoAutorizacao"]').fill(codAutorizacao);
 
+    T('quantidade ok → estabelecimento/cbo');
     await this.autocompleteComOverride(overrides, 'estabelecimento_terceiro', 'isEstabelecimentoTerceiro', 'Não', 'Não', 'app-procedimento');
     await this.autocompleteComOverride(overrides, 'cbo', 'cbo', '225265', 'oftalmologista', 'app-procedimento');
 
+    T('cbo ok → profissional');
     const profissional = this.valorOverride(overrides, 'profissional') || patient.medicoNome;
     await this.selecionarProfissional(profissional);
+    T('profissional ok → Registrar procedimento');
 
     const equipe = this.valorOverride(overrides, 'equipe_saude');
     if (equipe) await this.selecionarNgAutocomplete('equipeSaude', equipe, equipe, 'app-procedimento');
 
     await page.getByRole('button', { name: 'Registrar procedimento' }).click();
+    T('Registrar procedimento CLICADO');
     // O clique pode disparar o alerta "alterar o procedimento" — confirma.
     await this.confirmarAlterarProcedimento();
   }
