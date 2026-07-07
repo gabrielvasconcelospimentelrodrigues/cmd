@@ -120,8 +120,7 @@ export default function Painel() {
   const pendCount = patientsView.filter((p) => p.status === 'error' || p.status === 'needs_review').length;
   // Reflete o filtro do header: sidebar "Em execução" e status "IA ativa" mostram
   // o terminal selecionado (ou todos, se sem filtro) — ao vivo como se estivesse na conta.
-  // Inclui 'extracted' para o ao vivo ficar CONTÍNUO da extração até o cadastro (já adianta).
-  const runningUploads = uploadsView.filter((u) => ['registering', 'extracting', 'extracted'].includes(u.status));
+  const runningUploads = uploadsView.filter((u) => ['registering', 'extracting'].includes(u.status));
   // Mostra o ao vivo SEMPRE que houver automação rodando (o filtro só narrow-a a lista).
   const showRealTime = runningUploads.length > 0;
   const running = showRealTime;
@@ -266,7 +265,7 @@ function Home({ tenant, uploads, patients, empresas = [], contas = [], filtroMem
   // Estatísticas REAIS (agregado no banco, sem o teto de 500 da lista /patients).
   const [stats, setStats] = useState<StatsResp | null>(null);
 
-  const runningUploads = uploads.filter((u) => ['registering', 'extracting', 'extracted'].includes(u.status));
+  const runningUploads = uploads.filter((u) => ['registering', 'extracting'].includes(u.status));
   const custo = Number(tenant?.custo_mensal_funcionario ?? 3000) || 3000;
   const ok = patients.filter((p) => OK.includes(p.status));
   const reg = stats ? stats.registrados : ok.length;
@@ -865,6 +864,15 @@ function uploadPill(u: Upload): { tone: 'ok' | 'proc' | 'warn'; label: string } 
   if (u.status === 'extracting') return { tone: 'proc', label: fase ?? 'Analisando' };
   if (u.status === 'extracted') return { tone: 'proc', label: fase ?? 'Aguardando cadastro' };
   if (u.status === 'registering') return { tone: 'proc', label: fase ?? 'Cadastrando' };
+  // Concluído: mostra o RESULTADO real (cadastrados x pendências) — antes ficava
+  // eternamente "A registrar" quando tudo ia para pendências (duplicados/sem dados).
+  if (u.status === 'done') {
+    const reg = u.patients_registered;
+    const pend = Math.max(0, u.patients_found - u.patients_registered - u.patients_errored);
+    if (reg === 0) return { tone: 'warn', label: pend > 0 ? `Concluído — 0 novos (${pend} em pendências)` : 'Concluído — 0 cadastros' };
+    if (u.patients_errored > 0 || pend > 0) return { tone: 'warn', label: `Concluído — ${reg} cadastrado(s), ${u.patients_errored + pend} em pendências` };
+    return { tone: 'ok', label: `Concluído — ${reg} cadastrado(s)` };
+  }
   const proc = u.patients_registered + u.patients_errored;
   if (u.patients_found > 0 && proc >= u.patients_found) {
     return u.patients_errored > 0 ? { tone: 'warn', label: 'Concluído c/ erros' } : { tone: 'ok', label: 'Concluído' };
