@@ -26,6 +26,12 @@ export async function liveRoutes(app: FastifyInstance): Promise<void> {
       .maybeSingle();
     if (!up) return reply.code(404).send({ error: 'transmissão não encontrada.' });
 
+    // hijack(): assumimos o controle total da resposta (SSE via reply.raw). Sem
+    // isso, quando o handler async retorna, o Fastify tenta enviar a resposta e,
+    // como os headers já foram escritos, dispara ERR_HTTP_HEADERS_SENT — que
+    // NÃO era tratado e DERRUBAVA o processo (backend em crash-loop → 502).
+    reply.hijack();
+
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
@@ -34,7 +40,6 @@ export async function liveRoutes(app: FastifyInstance): Promise<void> {
       'Access-Control-Allow-Origin': '*',
     });
     reply.raw.write('retry: 3000\n\n');
-    reply.sent = true;
 
     // Conexão dedicada ao modo subscriber (ioredis não permite outros comandos
     // numa conexão já inscrita — por isso não reusamos a conexão do BullMQ).
@@ -72,10 +77,5 @@ export async function liveRoutes(app: FastifyInstance): Promise<void> {
     };
     req.raw.on('close', encerrar);
     req.raw.on('error', encerrar);
-
-    // Mantém a rota ativa enquanto o cliente estiver conectado
-    await new Promise<void>((resolve) => {
-      req.raw.on('close', () => resolve());
-    });
   });
 }
