@@ -194,6 +194,10 @@ export function startRegistrationWorker(): Worker<UploadJob> {
               } catch (e) {
                 // Esse paciente TRAVOU. Recupera a sessão p/ os próximos e o
                 // manda para Pendências (não congela o lote inteiro).
+                // DEBUG: fotografa a tela travada ANTES de recuperar (ex.: erro
+                // no Salvar/Finalizar) — o timeout do worker não passa pelo
+                // capturarDebug do cadastrarComRetry.
+                await automator.capturarDebug(`timeout_${p.nome || p.cns}`).catch(() => {});
                 await logEntry(uploadId, 'WARN', `⚠ ${p.nome || p.cns} ${(e as Error).message}. Recuperando a sessão e seguindo.`);
                 await comTimeout(automator.recuperarParaContatos(), 30_000, 'recuperar').catch(() => { precisaRetomar = true; });
                 r = { ok: false, erro: `Cadastro travou: ${(e as Error).message}` };
