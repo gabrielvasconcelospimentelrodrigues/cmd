@@ -231,7 +231,7 @@ export default function Painel() {
             <Enviar empresas={empresas} uploads={uploadsView} contas={contas} isMember={isMember} onChange={carregar} showToast={showToast} />
           </div>
           <div style={{ display: page === 'pendencias' ? 'block' : 'none' }}>
-            <Pendencias patients={patientsView} onChange={carregar} showToast={showToast} />
+            <Pendencias patients={patientsView} uploads={uploadsView} onChange={carregar} showToast={showToast} />
           </div>
           <div style={{ display: page === 'planos' ? 'block' : 'none' }}>
             <Planos
@@ -707,23 +707,23 @@ function EnviosRecentes({ empresas = [], uploads, contas = [], onChange, showToa
 
   const isRunning = (u: Upload) => ['registering', 'extracting', 'extracted'].includes(u.status);
   const temPendentes = (u: Upload) => u.patients_found > 0 && u.patients_registered + u.patients_errored < u.patients_found;
-  const cols = simple ? '1fr 150px 140px 120px 140px' : '1fr 150px 90px 100px 70px 130px 140px';
+  const cols = simple ? '1fr 190px 160px 110px 140px' : '1fr 190px 80px 92px 62px 92px 100px 128px';
   return (
     <Card style={{ overflow: 'hidden' }}>
       <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--c-border)', color: 'var(--c-ink3)', fontSize: 12, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase' }}>Envios recentes</div>
-      <div style={{ display: 'grid', gridTemplateColumns: cols, padding: '10px 20px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)', fontSize: 11, fontWeight: 600, color: 'var(--c-ink3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
-        <span>Arquivo</span><span>Status</span>{simple ? <span>Resultado</span> : <><span>Pacientes</span><span>Registrados</span><span>Erros</span></>}<span>Tempo</span><span style={{ textAlign: 'right' }}>Ações</span>
+      <div style={{ display: 'grid', gridTemplateColumns: cols, columnGap: 14, padding: '10px 20px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)', fontSize: 11, fontWeight: 600, color: 'var(--c-ink3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+        <span>Arquivo</span><span>Status</span>{simple ? <span>Resultado</span> : <><span>Pacientes</span><span>Registrados</span><span>Erros</span><span>Pendências</span></>}<span>Tempo</span><span style={{ textAlign: 'right' }}>Ações</span>
       </div>
       {uploads.length === 0 ? <div style={{ padding: 36, textAlign: 'center', color: 'var(--c-ink3)', fontSize: 14 }}>Nenhum envio ainda.</div> : uploads.map((u) => {
         const p = uploadPill(u);
         return (
-        <div key={u.id} style={{ display: 'grid', gridTemplateColumns: cols, alignItems: 'center', padding: '12px 20px', borderBottom: '1px solid var(--c-border)' }}>
-          <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || u.original_filename}</span>
-          <StatusPill tone={p.tone} label={p.label} />
+        <div key={u.id} style={{ display: 'grid', gridTemplateColumns: cols, columnGap: 14, alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--c-border)' }}>
+          <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{u.name || u.original_filename}</span>
+          <span style={{ minWidth: 0, display: 'flex' }}><StatusPill tone={p.tone} label={p.label} /></span>
           {simple ? (
-            <span style={{ fontSize: 13, display: 'flex', gap: 10 }}><span style={{ color: 'var(--c-okfg)' }}>✓ {u.patients_registered}</span><span style={{ color: u.patients_errored ? 'var(--c-err)' : 'var(--c-ink3)' }}>✗ {u.patients_errored}</span></span>
+            <span style={{ fontSize: 13, display: 'flex', gap: 10, flexWrap: 'wrap' }}><span style={{ color: 'var(--c-okfg)' }}>✓ {u.patients_registered}</span><span style={{ color: u.patients_errored ? 'var(--c-err)' : 'var(--c-ink3)' }}>✗ {u.patients_errored}</span><span style={{ color: 'var(--c-warn)' }}>⏳ {Math.max(0, u.patients_found - u.patients_registered - u.patients_errored)}</span></span>
           ) : (
-            <><span style={{ color: 'var(--c-ink2)', fontSize: 14 }}>{u.patients_found}</span><span style={{ color: 'var(--c-softfg)', fontSize: 14 }}>{u.patients_registered}</span><span style={{ color: u.patients_errored ? 'var(--c-err)' : 'var(--c-ink3)', fontSize: 14 }}>{u.patients_errored}</span></>
+            <><span style={{ color: 'var(--c-ink2)', fontSize: 14 }}>{u.patients_found}</span><span style={{ color: 'var(--c-softfg)', fontSize: 14 }}>{u.patients_registered}</span><span style={{ color: u.patients_errored ? 'var(--c-err)' : 'var(--c-ink3)', fontSize: 14 }}>{u.patients_errored}</span><span style={{ color: (u.patients_found - u.patients_registered - u.patients_errored) > 0 ? 'var(--c-warn)' : 'var(--c-ink3)', fontSize: 14, fontWeight: 600 }} title="Fichas em Pendências (duplicadas ou sem dados)">{Math.max(0, u.patients_found - u.patients_registered - u.patients_errored)}</span></>
           )}
           <span style={{ color: 'var(--c-ink2)', fontSize: 12 }} title={`Enviado ${new Date(u.uploaded_at).toLocaleString('pt-BR')}`}>{tempoInfo(u)}</span>
           <span style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', color: 'var(--c-ink3)' }}>
@@ -869,9 +869,9 @@ function uploadPill(u: Upload): { tone: 'ok' | 'proc' | 'warn'; label: string } 
   if (u.status === 'done') {
     const reg = u.patients_registered;
     const pend = Math.max(0, u.patients_found - u.patients_registered - u.patients_errored);
-    if (reg === 0) return { tone: 'warn', label: pend > 0 ? `Concluído — 0 novos (${pend} em pendências)` : 'Concluído — 0 cadastros' };
-    if (u.patients_errored > 0 || pend > 0) return { tone: 'warn', label: `Concluído — ${reg} cadastrado(s), ${u.patients_errored + pend} em pendências` };
-    return { tone: 'ok', label: `Concluído — ${reg} cadastrado(s)` };
+    if (reg === 0 && (pend > 0 || u.patients_errored > 0)) return { tone: 'warn', label: 'Concluído — 0 novos' };
+    if (u.patients_errored > 0 || pend > 0) return { tone: 'warn', label: 'Concluído c/ pendências' };
+    return { tone: 'ok', label: 'Concluído' };
   }
   const proc = u.patients_registered + u.patients_errored;
   if (u.patients_found > 0 && proc >= u.patients_found) {

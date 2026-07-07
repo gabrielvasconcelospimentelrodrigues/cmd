@@ -1,12 +1,17 @@
 import { useState } from 'react';
 import { AlertOctagon, RefreshCw, Check, CheckSquare } from 'lucide-react';
 import { apiPost } from '../../lib/api';
-import type { Ficha } from '../../lib/types';
+import type { Ficha, Upload } from '../../lib/types';
 import { Card } from './parts';
 import type { ToastData } from '../../components/iacmd/ui';
 
-export default function Pendencias({ patients, onChange, showToast }: { patients: Ficha[]; onChange: () => Promise<void>; showToast: (t: ToastData) => void }) {
+export default function Pendencias({ patients, uploads = [], onChange, showToast }: { patients: Ficha[]; uploads?: Upload[]; onChange: () => Promise<void>; showToast: (t: ToastData) => void }) {
   const pend = patients.filter((p) => p.status === 'error' || p.status === 'needs_review');
+  // Mapa id do envio -> nome da lista, para mostrar de qual lista é cada pendência.
+  const nomeDaLista = (uploadId: number): string => {
+    const u = uploads.find((x) => x.id === uploadId);
+    return u?.name || u?.original_filename || `Envio #${uploadId}`;
+  };
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
 
@@ -48,7 +53,7 @@ export default function Pendencias({ patients, onChange, showToast }: { patients
 
       <Card className="r-scroll-x" style={{ overflow: 'hidden' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '40px 1.6fr 1fr 110px 150px 1.4fr 100px', padding: '12px 18px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)', fontSize: 12, fontWeight: 600, color: 'var(--c-ink3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
-          <span /><span>Nome</span><span>CNS</span><span>Atend.</span><span>Envio</span><span>Motivo</span><span />
+          <span /><span>Nome</span><span>CNS</span><span>Atend.</span><span>Lista</span><span>Motivo</span><span />
         </div>
         {pend.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--c-ink3)', fontSize: 14 }}>Nenhuma pendência. 🎉</div>
@@ -58,7 +63,7 @@ export default function Pendencias({ patients, onChange, showToast }: { patients
             <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 500 }}>{p.nome || '—'}</span>
             <span className="ia-mono" style={{ color: 'var(--c-ink2)', fontSize: 12 }}>{p.cns || '—'}</span>
             <span style={{ color: 'var(--c-ink2)', fontSize: 13 }}>{p.data_atendimento ?? '—'}</span>
-            <span className="ia-mono" style={{ color: 'var(--c-softfg)', fontSize: 12 }}>Envio #{p.upload_id}</span>
+            <span style={{ color: 'var(--c-ink2)', fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={nomeDaLista(p.upload_id)}>{nomeDaLista(p.upload_id)}</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
               {(p.error_message || '').toLowerCase().includes('duplicad') && (
                 <span style={{ flex: 'none', fontSize: 10.5, fontWeight: 700, color: 'var(--c-warnfg)', background: 'var(--c-warnsoft)', padding: '2px 8px', borderRadius: 999, whiteSpace: 'nowrap' }}>DUPLICADO</span>
