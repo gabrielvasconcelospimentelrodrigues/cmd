@@ -714,7 +714,7 @@ function EnviosRecentes({ empresas = [], uploads, contas = [], onChange, showToa
     <Card style={{ overflow: 'hidden' }}>
       <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--c-border)', color: 'var(--c-ink3)', fontSize: 12, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase' }}>Envios recentes</div>
       <div style={{ display: 'grid', gridTemplateColumns: cols, columnGap: 14, padding: '10px 20px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)', fontSize: 11, fontWeight: 600, color: 'var(--c-ink3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
-        <span>Arquivo</span><span>Status</span>{simple ? <span>Resultado</span> : <><span>Pacientes</span><span>Registrados</span><span>Erros</span><span>Pendências</span></>}<span>Tempo</span><span style={{ textAlign: 'right' }}>Ações</span>
+        <span>Arquivo</span><span>Status</span>{simple ? <span>Resultado</span> : <><span>Pacientes</span><span>Registrados</span><span>Erros</span><span>Restantes</span></>}<span>Tempo</span><span style={{ textAlign: 'right' }}>Ações</span>
       </div>
       {uploads.length === 0 ? <div style={{ padding: 36, textAlign: 'center', color: 'var(--c-ink3)', fontSize: 14 }}>Nenhum envio ainda.</div> : uploads.map((u) => {
         const p = uploadPill(u);
@@ -725,7 +725,7 @@ function EnviosRecentes({ empresas = [], uploads, contas = [], onChange, showToa
           {simple ? (
             <span style={{ fontSize: 13, display: 'flex', gap: 10, flexWrap: 'wrap' }}><span style={{ color: 'var(--c-okfg)' }}>✓ {u.patients_registered}</span><span style={{ color: u.patients_errored ? 'var(--c-err)' : 'var(--c-ink3)' }}>✗ {u.patients_errored}</span><span style={{ color: 'var(--c-warn)' }}>⏳ {Math.max(0, u.patients_found - u.patients_registered - u.patients_errored)}</span></span>
           ) : (
-            <><span style={{ color: 'var(--c-ink2)', fontSize: 14 }}>{u.patients_found}</span><span style={{ color: 'var(--c-softfg)', fontSize: 14 }}>{u.patients_registered}</span><span style={{ color: u.patients_errored ? 'var(--c-err)' : 'var(--c-ink3)', fontSize: 14 }}>{u.patients_errored}</span><span style={{ color: (u.patients_found - u.patients_registered - u.patients_errored) > 0 ? 'var(--c-warn)' : 'var(--c-ink3)', fontSize: 14, fontWeight: 600 }} title="Fichas em Pendências (duplicadas ou sem dados)">{Math.max(0, u.patients_found - u.patients_registered - u.patients_errored)}</span></>
+            <><span style={{ color: 'var(--c-ink2)', fontSize: 14 }}>{u.patients_found}</span><span style={{ color: 'var(--c-softfg)', fontSize: 14 }}>{u.patients_registered}</span><span style={{ color: u.patients_errored ? 'var(--c-err)' : 'var(--c-ink3)', fontSize: 14 }}>{u.patients_errored}</span><span style={{ color: (u.patients_found - u.patients_registered - u.patients_errored) > 0 ? 'var(--c-warn)' : 'var(--c-ink3)', fontSize: 14, fontWeight: 600 }} title="Fichas que ainda faltam cadastrar (aguardando + em pendências). As pendências reais você vê na aba Pendências.">{Math.max(0, u.patients_found - u.patients_registered - u.patients_errored)}</span></>
           )}
           <span style={{ color: 'var(--c-ink2)', fontSize: 12 }} title={`Enviado ${new Date(u.uploaded_at).toLocaleString('pt-BR')}`}>{tempoInfo(u)}</span>
           <span style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', color: 'var(--c-ink3)' }}>
