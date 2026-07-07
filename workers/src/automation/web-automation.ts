@@ -958,19 +958,32 @@ export class WebAutomator {
     }
 
     this.passo(`Salvando e finalizando cadastro de ${nome || 'paciente'}...`);
-    await page.getByRole('button', { name: 'Salvar' }).click();
+    T('FINALIZAÇÃO: fotografa form completo e vai clicar Salvar');
+    await this.capturarDebug(`antes_salvar_${cns}`).catch(() => {});
+    await page.getByRole('button', { name: 'Salvar' }).click({ timeout: 15_000 }).catch(() => {});
+    T('Salvar CLICADO → aguarda modal carregando');
     await this.aguardarModalCarregamento();
-    await page.getByRole('button', { name: 'Finalizar' }).click();
+    // Após Salvar pode aparecer um modal de VALIDAÇÃO (campos faltando) — fotografa.
+    await this.capturarDebug(`apos_salvar_${cns}`).catch(() => {});
+    const btnFinalizar = page.getByRole('button', { name: 'Finalizar' }).first();
+    T('vai clicar Finalizar');
+    await btnFinalizar.click({ timeout: 15_000 }).catch(() => {});
+    T('Finalizar CLICADO → aguarda modal');
     await this.aguardarModalCarregamento();
+    await this.capturarDebug(`apos_finalizar_${cns}`).catch(() => {});
+    T('finalização concluída → confirma volta à lista');
 
     // Confirma que voltou à lista (botão "Incluir contato assistencial" visível).
     try {
       await page.getByRole('button', { name: 'Incluir contato assistencial' }).first().waitFor({ state: 'visible', timeout: 30_000 });
+      T('VOLTOU À LISTA — cadastro OK');
     } catch (e) {
       if (await page.getByRole('button', { name: 'Finalizar' }).isVisible({ timeout: 2000 }).catch(() => false)) {
+        T('!! Finalizar ainda visível — NÃO registrou');
         throw e; // formulário ainda aberto → não registrado → retry seguro
       }
       // Lista lenta para recarregar, mas o cadastro provavelmente foi enviado.
+      T('lista não recarregou mas cadastro provavelmente enviado');
     }
   }
 }
