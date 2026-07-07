@@ -575,6 +575,9 @@ export class WebAutomator {
     const sugestao = container.getByText(optionTextContains, { exact: false }).first();
     let selecionado = false;
     for (let tent = 0; tent < 3 && !selecionado; tent++) {
+      // A alerta "alterar o procedimento" pode reaparecer e bloquear a digitação
+      // (a busca vai pro vazio e a sugestão nunca vem). Confirma antes de digitar.
+      await this.confirmarAlterarProcedimento();
       if (tent > 0) {
         // limpa e redigita
         await inputBox.click({ timeout: 8000 }).catch(() => {});
@@ -583,13 +586,15 @@ export class WebAutomator {
         await page.waitForTimeout(300);
       }
       await inputBox.pressSequentially(searchText, { delay: 100 });
-      // espera a sugestão aparecer (servidor lento) — até ~12s.
+      // espera a sugestão aparecer (servidor lento) — até ~12s. Se uma alerta
+      // aparecer no meio, confirma e segue esperando.
       let apareceu = false;
       for (let i = 0; i < 120; i++) {
         if ((await sugestao.count().catch(() => 0)) > 0) { apareceu = true; break; }
+        if (i % 15 === 14) await this.confirmarAlterarProcedimento();
         await page.waitForTimeout(100);
       }
-      if (!apareceu) continue; // não veio: tenta redigitar
+      if (!apareceu) { await this.confirmarAlterarProcedimento(); continue; } // não veio: trata alerta e redigita
       await sugestao.click({ timeout: 5000 }).catch(() => {});
       // confirma que o campo ficou preenchido de fato
       for (let i = 0; i < 20; i++) {
