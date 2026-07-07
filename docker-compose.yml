@@ -5,8 +5,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: cmd-redis
-    # appendonly: persiste a fila em disco (não perde jobs em restart).
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction
+    # Senha via env REDIS_PASSWORD (fica no .env ao lado, NUNCA no git). Se
+    # vazia (dev local), sobe sem senha. appendonly: persiste a fila em disco.
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+    command: sh -c 'redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction ${REDIS_PASSWORD:+--requirepass "$$REDIS_PASSWORD"}'
     ports:
       # SÓ localhost — NUNCA expor o Redis na internet (evita sequestro/replica
       # maliciosa: um Redis 6379 aberto sem senha pode ser transformado em réplica
