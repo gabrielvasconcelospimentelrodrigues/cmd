@@ -79,10 +79,9 @@ export function startRegistrationWorker(): Worker<UploadJob> {
         return;
       }
 
-      // SERIALIZA POR CONTA CMD: duas listas da MESMA conta NÃO podem rodar ao
-      // mesmo tempo — o CMD-COLETA só mantém 1 sessão por operador, então a 2ª
-      // sessão DERRUBA a 1ª e nenhuma conclui. A 2ª lista espera a vez.
-      const execucao = await withLock(`conta:${conta.id}`, async () => {
+      // O CMD-COLETA ACEITA várias sessões do mesmo operador ao mesmo tempo, então
+      // listas diferentes (mesma conta ou não) rodam EM PARALELO. O lock é só por
+      // LISTA — impede processar a MESMA lista 2x (job duplicado).
       const resultado = await withLock(`upload:${uploadId}`, async () => {
         const config = await getMotorConfig().catch(() => MOTOR_CONFIG_PADRAO);
         const loginTimeoutMs = config.login_timeout_segundos * 1000;
@@ -261,22 +260,12 @@ export function startRegistrationWorker(): Worker<UploadJob> {
           await acrescentarTempoAtivo(uploadId, (Date.now() - sessaoInicioMs) / 1000);
         }
       });
-      return resultado;
-      }); // fecha o lock por conta CMD
 
-      if (execucao === 'locked') {
-        // Conta CMD ocupada por OUTRA lista (ou job duplicado desta) — espera a
-        // vez. Sai de 'registering' para 'extracted' para o WATCHDOG NÃO
-        // re-enfileirar em loop, e re-agenda com jobId FIXO (dedupe: BullMQ
-        // ignora um 2º job atrasado com o mesmo id) para não empilhar jobs.
-        const st = await statusDoUpload(uploadId);
-        if (st !== 'paused' && st !== 'parado') {
-          await setUploadStatus(uploadId, 'extracted', { current_step: 'Na fila — aguardando a conta CMD liberar…' });
-        }
-        await registrationQueue.add('registrar', { uploadId }, { delay: 45_000, jobId: `wait-conta-${uploadId}` });
+      if (resultado === 'locked') {
+        // Esta MESMA lista já está sendo processada (job duplicado) — descarta.
         return;
       }
-      if (execucao === 'done') {
+      if (resultado === 'done') {
         await verificationQueue.add('verificar', { uploadId }, { delay: 10_000 });
       }
     },
