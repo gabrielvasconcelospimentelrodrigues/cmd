@@ -818,7 +818,9 @@ export class WebAutomator {
   // ---- Cadastro de paciente (porta fiel de incluir_contato_assistencial) ---
   async incluirContato(patient: PatientData, dryRun = false): Promise<void> {
     const page = this.page!;
-    const cns = patient.cns;
+    // CPF/CNS: só números — remove pontos, traços e espaços (ex.: "123.456.789-00"
+    // ou CNS com espaços) para não dar erro no campo de busca do CADSUS.
+    const cns = String(patient.cns ?? '').replace(/\D/g, '');
     const nome = patient.nome || '';
     const overrides = patient.overrides || {};
 
