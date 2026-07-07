@@ -16,7 +16,7 @@ export function startExtractionWorker(): Worker<UploadJob> {
     QUEUE.EXTRACTION,
     async (job) => {
       const { uploadId } = job.data;
-      await setUploadStatus(uploadId, 'extracting');
+      await setUploadStatus(uploadId, 'extracting', { current_step: 'Analisando e mapeando a planilha...' });
       await logEntry(uploadId, 'INFO', 'Iniciando extração do arquivo.');
 
       const upload = await getUploadComConta(uploadId);
@@ -33,9 +33,10 @@ export function startExtractionWorker(): Worker<UploadJob> {
         return;
       }
 
+      await setUploadStatus(uploadId, 'extracting', { current_step: 'Verificando dados obrigatórios...' });
       const total = await inserirPacientes(uploadId, upload.clinic_account_id, pacientes);
       const incertos = pacientes.filter((p) => p.status === 'needs_review').length;
-      await setUploadStatus(uploadId, 'extracted', { patients_found: total });
+      await setUploadStatus(uploadId, 'extracted', { patients_found: total, current_step: 'Aguardando cadastro...' });
       await logEntry(
         uploadId,
         'INFO',

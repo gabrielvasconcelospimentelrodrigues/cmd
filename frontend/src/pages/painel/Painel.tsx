@@ -837,13 +837,31 @@ function tempoMedioStr(u: Upload): string {
   return med >= 1 ? `${med.toFixed(1).replace('.', ',')}s` : `${Math.round(med * 1000)}ms`;
 }
 
-/** Status real do envio (reflete se a automação já foi feita ou não). */
+/** Deduz a FASE real do envio a partir do current_step (texto do worker). */
+function faseDoStep(cs: string): string | null {
+  const s = (cs || '').toLowerCase();
+  if (!s) return null;
+  if (/duplic/.test(s)) return 'Verificando duplicidades';
+  if (/refazendo|revis/.test(s)) return 'Revisando';
+  if (/cadastrando|salvando|finalizando|diagn|procedimento|contato assistencial/.test(s)) return 'Cadastrando';
+  if (/travou|retomando|reconect/.test(s)) return 'Reconectando';
+  if (/login|portal|perfil|acessar|autentic|mfa|usu[aá]rio e senha/.test(s)) return 'Conectando';
+  if (/verificando dados|dados obrigat|dados faltan/.test(s)) return 'Verificando dados';
+  if (/mape/.test(s)) return 'Mapeando';
+  if (/analis|extra|lendo|planilha/.test(s)) return 'Analisando';
+  if (/aguardando/.test(s)) return 'Aguardando cadastro';
+  return null;
+}
+
+/** Status real do envio no listing — condizente com a fase que está acontecendo. */
 function uploadPill(u: Upload): { tone: 'ok' | 'proc' | 'warn'; label: string } {
-  if (u.status === 'registering') return { tone: 'proc', label: 'Registrando' };
-  if (u.status === 'extracting') return { tone: 'proc', label: 'Extraindo' };
   if (u.status === 'paused') return { tone: 'warn', label: 'Pausado' };
   if (u.status === 'parado') return { tone: 'warn', label: 'Parado' };
   if (u.status === 'extraction_failed' || u.status === 'registration_failed') return { tone: 'warn', label: 'Falhou' };
+  const fase = faseDoStep(u.current_step);
+  if (u.status === 'extracting') return { tone: 'proc', label: fase ?? 'Analisando' };
+  if (u.status === 'extracted') return { tone: 'proc', label: fase ?? 'Aguardando cadastro' };
+  if (u.status === 'registering') return { tone: 'proc', label: fase ?? 'Cadastrando' };
   const proc = u.patients_registered + u.patients_errored;
   if (u.patients_found > 0 && proc >= u.patients_found) {
     return u.patients_errored > 0 ? { tone: 'warn', label: 'Concluído c/ erros' } : { tone: 'ok', label: 'Concluído' };

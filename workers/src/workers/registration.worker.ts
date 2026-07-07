@@ -88,7 +88,7 @@ export function startRegistrationWorker(): Worker<UploadJob> {
         // RETOMADA: preserva o início do registro (não reseta o tempo do
         // relatório) e CONTINUA os contadores de onde parou — não zera.
         const inicio = upload.registro_iniciado_em ?? new Date().toISOString();
-        await setUploadStatus(uploadId, 'registering', { job_id: job.id ?? '', registro_iniciado_em: inicio, registro_concluido_em: null, sessao_iniciada_em: new Date().toISOString() });
+        await setUploadStatus(uploadId, 'registering', { job_id: job.id ?? '', registro_iniciado_em: inicio, registro_concluido_em: null, sessao_iniciada_em: new Date().toISOString(), current_step: 'Verificando duplicidades...' });
         try {
         // ANTES de cadastrar: confere duplicados e manda-os para Pendências.
         // (Vale também quando a extração dispara o registro automaticamente.)
