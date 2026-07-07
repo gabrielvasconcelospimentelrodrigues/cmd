@@ -34,6 +34,7 @@ export async function liveRoutes(app: FastifyInstance): Promise<void> {
       'Access-Control-Allow-Origin': '*',
     });
     reply.raw.write('retry: 3000\n\n');
+    reply.sent = true;
 
     // Conexão dedicada ao modo subscriber (ioredis não permite outros comandos
     // numa conexão já inscrita — por isso não reusamos a conexão do BullMQ).

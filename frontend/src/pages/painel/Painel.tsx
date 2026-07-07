@@ -39,6 +39,7 @@ export default function Painel() {
   const [toast, showToast] = useToast();
   const [perfilAberto, setPerfilAberto] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [liveSidebarUpload, setLiveSidebarUpload] = useState<Upload | null>(null);
   const [page, setPageInternal] = useState<Page>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('cmd_active_page') as Page;
@@ -148,7 +149,7 @@ export default function Painel() {
             </div>
             <div style={{ maxHeight: runningUploads.length > 3 ? 340 : 'none', overflowY: runningUploads.length > 3 ? 'auto' : 'visible', display: 'flex', flexDirection: 'column', gap: 4 }}>
               {runningUploads.map((u) => (
-                <LiveFeed key={u.id} upload={u} patients={patients.filter((p) => p.upload_id === u.id)} contas={contas} multiple={runningUploads.length > 1} />
+                 <LiveFeed key={u.id} upload={u} patients={patients.filter((p) => p.upload_id === u.id)} contas={contas} multiple={runningUploads.length > 1} onClick={() => setLiveSidebarUpload(u)} />
               ))}
             </div>
           </div>
@@ -249,6 +250,7 @@ export default function Painel() {
         </div>
       </main>
       {perfilAberto && <ProfileSecurity onClose={() => setPerfilAberto(false)} showToast={showToast} papelLabel="Assinante" />}
+      {liveSidebarUpload && <RoboAoVivoModal upload={liveSidebarUpload} onClose={() => setLiveSidebarUpload(null)} />}
       <Toast data={toast} />
     </div>
   );
@@ -1132,7 +1134,7 @@ function feedRow(key: string, nome: string, kind: 'spin' | 'ok' | 'err' | 'warn'
   );
 }
 
-function LiveFeed({ upload, patients, contas = [], multiple }: { upload: Upload; patients: Ficha[]; contas?: ClinicAccount[]; multiple?: boolean }) {
+function LiveFeed({ upload, patients, contas = [], multiple, onClick }: { upload: Upload; patients: Ficha[]; contas?: ClinicAccount[]; multiple?: boolean; onClick?: () => void }) {
   const reg = upload.patients_registered;
   const total = upload.patients_found;
   const pct = total ? Math.round((reg / total) * 100) : 0;
@@ -1149,7 +1151,12 @@ function LiveFeed({ upload, patients, contas = [], multiple }: { upload: Upload;
   const terminalLabel = conta ? conta.label : upload.terminal_slot ? `Terminal #${upload.terminal_slot}` : 'Automação';
 
   return (
-    <div style={{ padding: '8px 12px 6px', borderTop: multiple ? '1px solid var(--c-side-border)' : 'none', display: 'flex', flexDirection: 'column', gap: 5 }}>
+    <div
+      onClick={onClick}
+      onMouseEnter={(e) => { if (onClick) e.currentTarget.style.background = 'var(--c-side-active-bg)'; }}
+      onMouseLeave={(e) => { if (onClick) e.currentTarget.style.background = 'transparent'; }}
+      style={{ padding: '8px 12px 6px', borderTop: multiple ? '1px solid var(--c-side-border)' : 'none', display: 'flex', flexDirection: 'column', gap: 5, cursor: onClick ? 'pointer' : 'default', transition: 'background 0.2s', borderRadius: 8 }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px 2px' }}>
         <span style={{ color: 'var(--c-side-ink)', fontSize: 11, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🖥️ {terminalLabel}</span>
         <span style={{ color: 'var(--c-side-ink3)', fontSize: 10, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={upload.name || upload.original_filename}>{upload.name || upload.original_filename}</span>
