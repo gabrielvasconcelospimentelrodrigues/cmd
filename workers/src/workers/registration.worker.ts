@@ -7,6 +7,7 @@ import {
 } from '../lib/repo';
 import { proximaJanelaPermitida } from '../scheduling';
 import { withLock } from '../lib/lock';
+import { comMutex } from '../lib/mutex';
 import { decrypt } from '../lib/crypto';
 import { WebAutomator, ProfessionalNotFoundError, type PatientData } from '../automation/web-automation';
 import { getMotorConfig, MOTOR_CONFIG_PADRAO } from '../lib/motor-config';
@@ -146,7 +147,9 @@ export function startRegistrationWorker(): Worker<UploadJob> {
           try {
             await automator.start();
             try {
-              await comTimeout(automator.login(), loginTimeoutMs, 'login');
+              // Serializa o LOGIN por conta gov (mesmo TOTP não pode ser usado
+              // por vários logins simultâneos). O cadastro depois segue paralelo.
+              await comMutex(`login:${conta.cmd_username}`, () => comTimeout(automator.login(), loginTimeoutMs, 'login'));
             } catch (e) {
               await logEntry(uploadId, 'WARN', `⚠ Automação ${(e as Error).message} no login. Pausando e retomando em 30s de onde parou (${registered} já cadastrado(s)).`);
               precisaRetomar = true;

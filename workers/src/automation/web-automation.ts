@@ -12,13 +12,6 @@ import { generateTotp } from './totp';
  */
 const URL_LOGIN = 'https://acesso.saude.gov.br/login';
 
-// ⚠️ REGRA PROVISÓRIA (remover depois): dá até 5 minutos para o trecho
-// login → tela "Contatos Assistenciais" (onde costuma travar) se resolver,
-// reinsistindo nos redirects/perfil/ACESSAR. Os demais passos seguem os
-// timeouts padrão. Para desativar: baixar de volta para ~40_000ms (ou remover
-// o loop de reinsistência em login()).  [pendência lembrada ao usuário]
-const PROVISORIO_LOGIN_ATE_CONTATOS_MS = 5 * 60_000;
-
 // Códigos de procedimento (SIGTAP) — porta de PROCEDURE_CODES (web_automation.py).
 // 1 a 5 valem a partir de 9 anos; 6 substitui o 1 para 0 a 8 anos.
 const PROCEDURE_CODES: Record<number, [string, string]> = {
@@ -349,61 +342,41 @@ export class WebAutomator {
     }
 
     await this.selecionarPerfilMinisterio(page);
+    this.passo('Abrindo o CMD-COLETA...');
 
-    // ⚠️ REGRA PROVISÓRIA (5 min): reinsiste no trecho perfil → ACESSAR →
-    // CMD-COLETA até a tela "Contatos Assistenciais" (botão "Incluir contato
-    // assistencial") aparecer, ou estourar PROVISORIO_LOGIN_ATE_CONTATOS_MS.
-    // Cada tentativa refaz: seleção de perfil, abrir a nova aba pelo "ACESSAR"
-    // e, se cair no login do app, "Entrar"/goto home.
-    const prazo = Date.now() + PROVISORIO_LOGIN_ATE_CONTATOS_MS;
-    let dashboardOk = false;
-    let tentativa = 0;
-    while (Date.now() < prazo && !dashboardOk) {
-      tentativa++;
-      const restanteMin = Math.max(0, Math.ceil((prazo - Date.now()) / 60_000));
-      this.passo(`Abrindo CMD-COLETA (tentativa ${tentativa}, até ${restanteMin} min)...`);
-
-      // Reforça a seleção de perfil caso ainda esteja na tela do SCPA.
-      await this.selecionarPerfilMinisterio(this.page!).catch(() => {});
-
-      // Portal "Meus Sistemas" → "ACESSAR" abre o CMD-COLETA em nova aba.
-      try {
-        const [novaAba] = await Promise.all([
-          this.context!.waitForEvent('page', { timeout: 8000 }),
-          page.getByText('ACESSAR', { exact: true }).click({ timeout: 5000 }),
-        ]);
-        await novaAba.waitForLoadState();
-        this.page = novaAba;
-        this.page.setDefaultTimeout(45_000);
-        await this.stopScreencast();
-        await this.startScreencast();
-        await this.page.waitForTimeout(2000);
-      } catch {
-        /* já no app ou ainda sem o botão ACESSAR — segue */
-      }
+    // Portal "Meus Sistemas" → "ACESSAR" abre o CMD-COLETA em nova aba.
+    try {
+      const [novaAba] = await Promise.all([
+        this.context!.waitForEvent('page', { timeout: 8000 }),
+        page.getByText('ACESSAR', { exact: true }).click({ timeout: 5000 }),
+      ]);
+      await novaAba.waitForLoadState();
+      this.page = novaAba;
+      this.page.setDefaultTimeout(45_000);
+      await this.stopScreencast();
+      await this.startScreencast();
+      await this.page.waitForTimeout(2000);
 
       // Se a aba do app caiu no login, tenta "Entrar"/ir pra home.
       for (let t = 0; t < 3; t++) {
-        if (!this.page!.url().includes('login')) break;
-        await this.page!.getByRole('button', { name: 'Entrar', exact: true }).click({ timeout: 5000 }).catch(() => {});
-        await this.page!.waitForTimeout(4000);
-        if (this.page!.url().includes('login')) {
-          await this.page!.goto('https://cmd-coleta.saude.gov.br/#/home').catch(() => {});
-          await this.page!.waitForTimeout(4000);
+        if (!this.page.url().includes('login')) break;
+        await this.page.getByRole('button', { name: 'Entrar', exact: true }).click({ timeout: 5000 }).catch(() => {});
+        await this.page.waitForTimeout(4000);
+        if (this.page.url().includes('login')) {
+          await this.page.goto('https://cmd-coleta.saude.gov.br/#/home').catch(() => {});
+          await this.page.waitForTimeout(4000);
         }
       }
-
-      // Dashboard já apareceu? (espera curta; o laço externo é quem dá os 5 min)
-      dashboardOk = await this.page!.getByRole('button', { name: 'Incluir contato assistencial' })
-        .first().waitFor({ state: 'visible', timeout: 20_000 }).then(() => true).catch(() => false);
-
-      if (!dashboardOk) await this.page!.waitForTimeout(3000);
+    } catch {
+      /* já no app ou ainda sem o botão ACESSAR — segue para a checagem do dashboard */
     }
 
+    // Espera o dashboard ("Incluir contato assistencial") até 40s. O timeout
+    // total do login é limitado pelo comTimeout(login_timeout_segundos) externo.
+    const dashboardOk = await this.page!.getByRole('button', { name: 'Incluir contato assistencial' })
+      .first().waitFor({ state: 'visible', timeout: 40_000 }).then(() => true).catch(() => false);
     if (!dashboardOk) {
-      // Estourou os 5 min sem chegar na tela de contatos → falha explícita para
-      // o retry/relogin de nível superior tratar (em vez de seguir cego).
-      throw new Error('Não foi possível chegar à tela "Contatos Assistenciais" em 5 min (regra provisória).');
+      throw new Error('Não foi possível abrir a tela "Contatos Assistenciais".');
     }
 
     await this.dispensarModalSair();
