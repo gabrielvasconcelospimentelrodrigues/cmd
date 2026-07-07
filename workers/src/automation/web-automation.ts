@@ -530,6 +530,24 @@ export class WebAutomator {
     await page.waitForTimeout(500);
   }
 
+  /** Confirma o alerta "Ao alterar o procedimento, os demais campos entre eles
+   * os profissionais serão apagados. Deseja continuar?" clicando em "Sim". Ele
+   * aparece ao (re)selecionar procedimento/terminologia e, se não for confirmado,
+   * fica aberto bloqueando TODO o resto do cadastro (era a causa de 0 cadastros).
+   * O profissional apagado é re-preenchido logo em seguida pelo próprio fluxo.
+   * Retorna true se tratou um alerta. */
+  private async confirmarAlterarProcedimento(): Promise<boolean> {
+    const page = this.page!;
+    const alerta = page.locator('ion-alert:has-text("alterar o procedimento")').first();
+    if (!(await alerta.isVisible({ timeout: 800 }).catch(() => false))) return false;
+    // Botão de confirmação do ion-alert ("Sim").
+    const sim = alerta.locator('button.alert-button-role-confirm');
+    if (await sim.count().catch(() => 0)) await sim.first().click({ timeout: 3000 }).catch(() => {});
+    else await alerta.getByRole('button', { name: 'Sim', exact: true }).click({ timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(600);
+    return true;
+  }
+
   /** Preenche um campo ng-autocomplete (Angular): digita e clica na sugestão. */
   private async selecionarNgAutocomplete(formcontrolname: string, searchText: string, optionTextContains: string, within?: string): Promise<void> {
     const page = this.page!;
@@ -538,7 +556,13 @@ export class WebAutomator {
       .locator(`ng-autocomplete[formcontrolname="${formcontrolname}"]`)
       .filter({ hasNot: page.locator('input[disabled]') });
     const inputBox = container.locator('input');
+    // Um alerta "alterar o procedimento" pendente intercepta o clique — confirma antes.
+    await this.confirmarAlterarProcedimento();
     await inputBox.click({ timeout: 20_000 });
+    // O próprio clique pode disparar o alerta — confirma e reclica no campo.
+    if (await this.confirmarAlterarProcedimento()) {
+      await inputBox.click({ timeout: 10_000 }).catch(() => {});
+    }
     // Digitação caractere a caractere — alguns campos buscam no servidor por keystroke.
     await inputBox.pressSequentially(searchText, { delay: 100 });
     const sugestao = container.getByText(optionTextContains, { exact: false }).first();
@@ -658,6 +682,9 @@ export class WebAutomator {
     else { [codigo, descricao] = PROCEDURE_CODES[codigoIdx!]!; }
     const dataAtendimentoStr = this.valorOverride(overrides, 'data_realizacao') || (patient.dataAtendimento ? fmtDate(patient.dataAtendimento) : '');
 
+    // Limpa qualquer alerta "alterar o procedimento" pendente da iteração anterior.
+    await this.confirmarAlterarProcedimento();
+
     const dataField = page.locator('ion-input[formcontrolname="dataRealizacao"]');
     const dataInput = dataField.locator('input');
     const lupaIcon = dataField.locator('xpath=..').locator('ion-icon');
@@ -734,6 +761,8 @@ export class WebAutomator {
     if (equipe) await this.selecionarNgAutocomplete('equipeSaude', equipe, equipe, 'app-procedimento');
 
     await page.getByRole('button', { name: 'Registrar procedimento' }).click();
+    // O clique pode disparar o alerta "alterar o procedimento" — confirma.
+    await this.confirmarAlterarProcedimento();
   }
 
   // ---- Cadastro de paciente (porta fiel de incluir_contato_assistencial) ---
