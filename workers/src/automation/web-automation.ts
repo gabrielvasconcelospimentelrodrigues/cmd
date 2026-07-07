@@ -447,7 +447,8 @@ export class WebAutomator {
     if (await listoNaLista()) return;
 
     // 1) Fecha overlays/dropdowns/modais que interceptam cliques (dropdown de
-    //    autocomplete aberto, modal "deseja sair", etc.).
+    //    autocomplete aberto, alerta "alterar procedimento", modal "deseja sair").
+    await this.confirmarAlterarProcedimento().catch(() => {});
     for (let i = 0; i < 3; i++) { await page.keyboard.press('Escape').catch(() => {}); await page.waitForTimeout(200); }
     await this.fecharOverlayAutocomplete().catch(() => {});
     await this.dispensarModalSair();
@@ -538,14 +539,18 @@ export class WebAutomator {
    * Retorna true se tratou um alerta. */
   private async confirmarAlterarProcedimento(): Promise<boolean> {
     const page = this.page!;
-    const alerta = page.locator('ion-alert:has-text("alterar o procedimento")').first();
-    if (!(await alerta.isVisible({ timeout: 800 }).catch(() => false))) return false;
-    // Botão de confirmação do ion-alert ("Sim").
-    const sim = alerta.locator('button.alert-button-role-confirm');
-    if (await sim.count().catch(() => 0)) await sim.first().click({ timeout: 3000 }).catch(() => {});
-    else await alerta.getByRole('button', { name: 'Sim', exact: true }).click({ timeout: 3000 }).catch(() => {});
-    await page.waitForTimeout(600);
-    return true;
+    let tratou = false;
+    // Pode reaparecer — confirma em laço até sumir (máx 4x).
+    for (let i = 0; i < 4; i++) {
+      const alerta = page.locator('ion-alert:has-text("alterar o procedimento")').first();
+      if (!(await alerta.isVisible({ timeout: 600 }).catch(() => false))) break;
+      const sim = alerta.locator('button.alert-button-role-confirm');
+      if (await sim.count().catch(() => 0)) await sim.first().click({ timeout: 3000 }).catch(() => {});
+      else await alerta.getByRole('button', { name: 'Sim', exact: true }).click({ timeout: 3000 }).catch(() => {});
+      await page.waitForTimeout(500);
+      tratou = true;
+    }
+    return tratou;
   }
 
   /** Preenche um campo ng-autocomplete (Angular): digita e clica na sugestão. */
@@ -780,6 +785,9 @@ export class WebAutomator {
     const dataAtendimentoStr = fmtDate(patient.dataAtendimento);
     this.passo(`Iniciando cadastro de ${nome || 'paciente'} (CNS ${cns})...`);
 
+    // Limpa alerta "alterar o procedimento" que possa ter vazado do paciente
+    // anterior (fica aberto bloqueando o formulário deste).
+    await this.confirmarAlterarProcedimento();
     // A página tem cópia duplicada do botão (layout mobile/desktop) — .first().
     await page.getByRole('button', { name: 'Incluir contato assistencial' }).first().click();
     // Confirma que o indivíduo possui documentação.
