@@ -1,5 +1,5 @@
 import { Worker } from 'bullmq';
-import { bullConnection } from '../lib/redis';
+import { bullConnection, connection } from '../lib/redis';
 import { QUEUE, type UploadJob, registrationQueue, verificationQueue } from '../queues';
 import { env } from '../config/env';
 import {
@@ -357,8 +357,18 @@ async function cadastrarComRetry(automator: WebAutomator, pd: PatientData, uploa
   }
 }
 
-/** Detecta se o usuário pausou/parou o envio (entre pacientes). */
+/** Detecta se o usuário pausou/parou o envio. Checa PRIMEIRO as flags no Redis
+ * (ctrl:pause / ctrl:stop) — elas NÃO são sobrescritas pelo onStep (que grava
+ * status='registering' a cada passo), então a pausa/parada manual é sempre
+ * respeitada. Depois cai no status do banco (parado por exclusão etc.). */
 async function pausouOuParou(uploadId: number): Promise<boolean> {
+  try {
+    const [pause, stop] = await Promise.all([
+      connection.exists(`ctrl:pause:${uploadId}`),
+      connection.exists(`ctrl:stop:${uploadId}`),
+    ]);
+    if (pause || stop) return true;
+  } catch { /* Redis fora → cai no status do banco */ }
   const st = await statusDoUpload(uploadId);
   return st === 'paused' || st === 'parado';
 }

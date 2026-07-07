@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { supabaseAdmin } from '../lib/supabase';
 import { extractionQueue, registrationQueue } from '../lib/queue';
+import { getRedis } from '../lib/redis';
 import { gerarShortCode } from '../lib/shortcode';
 import { registrarLog, ator, atorNome } from '../lib/audit';
 import { analisarColunas, CAMPOS_OBRIGATORIOS } from '../lib/colunas';
@@ -481,9 +482,10 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     const isOwner = (up as any).clinic_accounts?.tenant_id === req.tenant!.id || (up as any).empresas?.tenant_id === req.tenant!.id;
     if (!isOwner) return reply.code(404).send({ error: 'envio não encontrado.' });
 
-    // 1) Marca parado + deleted_at PRIMEIRO — se a automação estiver rodando,
-    //    ela aborta na próxima checagem (não fica fantasma escrevendo em linha
-    //    que vai sumir).
+    // 1) Marca parado + deleted_at + FLAG de stop no Redis PRIMEIRO — se a
+    //    automação estiver rodando, ela aborta na próxima checagem (a flag não é
+    //    sobrescrita pelo onStep, diferente do status).
+    await getRedis().set(`ctrl:stop:${id}`, '1', 'EX', 86400).catch(() => {});
     await (supabaseAdmin as any).from('uploads').update({ deleted_at: new Date().toISOString(), status: 'parado', sessao_iniciada_em: null }).eq('id', id);
 
     // 2) Apaga DE VERDADE do banco, filhos antes do pai (FKs: execucoes_automacao,
@@ -542,12 +544,19 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
 
     const nomeLista = (up as any).name || `lista #${id}`;
     if (acao === 'pausar') {
+      // FLAG no Redis: o robô grava status='registering' a cada passo (onStep) e
+      // sobrescreveria 'paused'. A flag NÃO é tocada pelo onStep, então a pausa é
+      // sempre respeitada (o worker a lê entre pacientes / no laço de login).
+      await getRedis().set(`ctrl:pause:${id}`, '1', 'EX', 86400).catch(() => {});
       await supabaseAdmin.from('uploads').update({ status: 'paused' }).eq('id', id);
       await registrarLog({ tenantId: req.tenant!.id, categoria: 'automacao', acao: 'automacao.pausada', nivel: 'alerta', ator: ator(req), descricao: `${atorNome(req)} pausou a automação da lista "${nomeLista}".`, meta: { upload_id: id } });
     } else if (acao === 'parar') {
+      await getRedis().set(`ctrl:stop:${id}`, '1', 'EX', 86400).catch(() => {});
       await supabaseAdmin.from('uploads').update({ status: 'parado' }).eq('id', id);
       await registrarLog({ tenantId: req.tenant!.id, categoria: 'automacao', acao: 'automacao.parada', nivel: 'alerta', ator: ator(req), descricao: `${atorNome(req)} parou a automação da lista "${nomeLista}".`, meta: { upload_id: id } });
     } else {
+      // iniciar/retomar: limpa as flags de pausa/parada para poder rodar.
+      await getRedis().del(`ctrl:pause:${id}`, `ctrl:stop:${id}`).catch(() => {});
       // GATE DE PAGAMENTO: só usa os terminais se os custos estão em dia.
       // Bloqueia se houver fatura VENCIDA em aberto.
       const hojeStr = new Date().toISOString().slice(0, 10);
