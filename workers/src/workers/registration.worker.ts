@@ -266,9 +266,14 @@ export function startRegistrationWorker(): Worker<UploadJob> {
 
       if (execucao === 'locked') {
         // Conta CMD ocupada por OUTRA lista (ou job duplicado desta) — espera a
-        // vez: re-enfileira. Evita 2 sessões simultâneas que se derrubam.
-        await registrationQueue.add('registrar', { uploadId }, { delay: 45_000 });
-        await logEntry(uploadId, 'INFO', 'Conta CMD ocupada por outra lista — aguardando a vez (o CMD só mantém 1 sessão por login).');
+        // vez. Sai de 'registering' para 'extracted' para o WATCHDOG NÃO
+        // re-enfileirar em loop, e re-agenda com jobId FIXO (dedupe: BullMQ
+        // ignora um 2º job atrasado com o mesmo id) para não empilhar jobs.
+        const st = await statusDoUpload(uploadId);
+        if (st !== 'paused' && st !== 'parado') {
+          await setUploadStatus(uploadId, 'extracted', { current_step: 'Na fila — aguardando a conta CMD liberar…' });
+        }
+        await registrationQueue.add('registrar', { uploadId }, { delay: 45_000, jobId: `wait-conta-${uploadId}` });
         return;
       }
       if (execucao === 'done') {
