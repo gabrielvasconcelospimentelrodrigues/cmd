@@ -16,3 +16,9 @@ export function encrypt(plaintext: string): string {
   if (!plaintext) return plaintext;
   return new Fernet.Token({ secret: secret() }).encode(plaintext);
 }
+
+export function decrypt(ciphertext: string): string {
+  if (!ciphertext) return ciphertext;
+  const token = new Fernet.Token({ secret: secret(), token: ciphertext, ttl: 0 });
+  return token.decode();
+}

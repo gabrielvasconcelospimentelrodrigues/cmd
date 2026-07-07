@@ -308,6 +308,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
     const hoje = new Date().toISOString().slice(0, 10);
 
+    const { decrypt } = await import('../lib/crypto');
+
     const [{ data: tenant }, plano] = await Promise.all([
       supabaseAdmin.from('tenants').select('*').eq('id', id).maybeSingle(),
       montarPlano(id),
@@ -316,7 +318,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
     const [{ data: faturas }, { data: terminais }, { data: atividades }, { data: members }, envios] = await Promise.all([
       (supabaseAdmin as any).from('faturas').select('id, tipo, descricao, referencia, valor, vencimento, status, pago_em, empresas(nome)').eq('tenant_id', id).order('vencimento', { ascending: false }),
-      (supabaseAdmin as any).from('clinic_accounts').select('id, label, cmd_username, is_enabled, empresa_id, member_user_id, last_run_at, last_run_status, cid_padrao').eq('tenant_id', id).order('id', { ascending: true }),
+      (supabaseAdmin as any).from('clinic_accounts').select('id, label, cmd_username, cmd_password_encrypted, mfa_secret_encrypted, is_enabled, empresa_id, member_user_id, last_run_at, last_run_status, cid_padrao, cid_oci_0_8, cid_9_mais').eq('tenant_id', id).order('id', { ascending: true }),
       (supabaseAdmin as any).from('audit_logs').select('id, categoria, acao, descricao, nivel, actor_nome, criado_em').eq('tenant_id', id).order('criado_em', { ascending: false }).limit(60),
       (supabaseAdmin as any).from('tenant_members').select('id, user_id, nome, email, role, empresa_id').eq('tenant_id', id),
       uploadsDoTenant(id, 'id, name, original_filename, status, uploaded_at, empresa_id, clinic_account_id, patients_found, patients_registered, patients_errored, registro_concluido_em, tempo_ativo_segundos, retry_rounds'),
@@ -358,7 +360,27 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         proxima_vencimento: proxima ? { descricao: proxima.descricao, valor: Number(proxima.valor), vencimento: proxima.vencimento, vencida: proxima.vencimento < hoje } : null,
       },
       faturas: fats.map((f) => ({ ...f, valor: Number(f.valor), empresa_nome: f.empresas?.nome ?? null, vencida: f.status === 'aberto' && f.vencimento < hoje })),
-      terminais: (terminais ?? []).map((t: any) => ({ ...t, empresa_nome: empNomes.get(t.empresa_id) ?? null, membro_nome: memberNomes.get(t.member_user_id) ?? null })),
+      terminais: (terminais ?? []).map((t: any) => {
+        let passwordDecrypted = null;
+        let mfaDecrypted = null;
+        try {
+          if (t.cmd_password_encrypted) passwordDecrypted = decrypt(t.cmd_password_encrypted);
+        } catch (e) {
+          req.log.error(e);
+        }
+        try {
+          if (t.mfa_secret_encrypted) mfaDecrypted = decrypt(t.mfa_secret_encrypted);
+        } catch (e) {
+          req.log.error(e);
+        }
+        return {
+          ...t,
+          cmd_password: passwordDecrypted,
+          mfa_secret: mfaDecrypted,
+          empresa_nome: empNomes.get(t.empresa_id) ?? null,
+          membro_nome: memberNomes.get(t.member_user_id) ?? null
+        };
+      }),
       envios: envList.map((u) => ({
         id: u.id, nome: u.name || u.original_filename || `lista #${u.id}`, status: u.status,
         empresa_nome: empNomes.get(u.empresa_id) ?? null, uploaded_at: u.uploaded_at,

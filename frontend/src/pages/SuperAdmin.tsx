@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode, type CSSProperties } from 'react';
 import {
   LayoutDashboard, ShieldCheck, Building2, Users, CreditCard, ScrollText, SlidersHorizontal,
-  LogOut, Sun, Moon, Check, X, Shield, Cpu, Wallet, Loader2, MoreVertical, KeyRound, Pencil, Ban, Trash2, UserPlus, Copy, Menu,
+  LogOut, Sun, Moon, Check, X, Shield, Cpu, Wallet, Loader2, MoreVertical, KeyRound, Pencil, Ban, Trash2, UserPlus, Copy, Menu, Eye, EyeOff,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { useTheme, LogoMark, useToast, Toast, PasswordField, type ToastData } from '../components/iacmd/ui';
@@ -555,12 +555,12 @@ interface Dossie {
   plano: { mensal: number; total_terminais: number; nao_alocados: number; valor_terminal: number; valor_implantacao: number; implantacao_paga: boolean; empresas: { id: number; nome: string; terminais: number; mensal: number }[] } | null;
   resumo: { envios_total: number; envios_concluidos: number; cadastrados: number; erros: number; encontrados: number; taxa_pct: number; tempo_ativo_segundos: number; terminais_conectados: number; em_aberto: number; vencido: number; inadimplente: boolean; proxima_vencimento: { descricao: string; valor: number; vencimento: string; vencida: boolean } | null };
   faturas: { id: number; tipo: string; descricao: string | null; referencia: string; valor: number; vencimento: string; status: string; empresa_nome: string | null; vencida: boolean }[];
-  terminais: { id: number; label: string | null; cmd_username: string | null; is_enabled: boolean; empresa_nome: string | null; membro_nome: string | null; last_run_at: string | null; last_run_status: string | null; cid_padrao: string | null }[];
+  terminais: { id: number; label: string | null; cmd_username: string | null; cmd_password?: string | null; mfa_secret?: string | null; is_enabled: boolean; empresa_nome: string | null; membro_nome: string | null; last_run_at: string | null; last_run_status: string | null; cid_padrao: string | null; cid_oci_0_8?: string | null; cid_9_mais?: string | null }[];
   envios: { id: number; nome: string; status: string; empresa_nome: string | null; uploaded_at: string; encontrados: number; cadastrados: number; erros: number; concluido_em: string | null; retry_rounds: number; tempo_ativo_segundos: number }[];
   membros: { id: number; user_id: string; nome: string | null; email: string; role: string; empresa_id: number | null; cmd_conectado?: boolean }[];
   atividades: { id: number; categoria: string; acao: string; descricao: string; nivel: string; actor_nome: string | null; criado_em: string }[];
 }
-type AbaDossie = 'geral' | 'membros' | 'faturas' | 'terminais' | 'envios' | 'atividades';
+type AbaDossie = 'geral' | 'onboarding' | 'membros' | 'faturas' | 'terminais' | 'envios' | 'atividades';
 
 const dmy = (iso: string | null) => iso ? iso.slice(0, 10).split('-').reverse().join('/') : '—';
 const dmyHora = (iso: string | null) => { if (!iso) return '—'; const d = new Date(iso); return `${dmy(iso)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
@@ -593,6 +593,7 @@ function EmpresaModal({ tenantId, onClose, showToast, onReload, onVerPlano }: { 
   const p = t ? statusPill(t.status) : null;
   const ABAS: [AbaDossie, string][] = [
     ['geral', 'Visão geral'],
+    ['onboarding', 'Dados do Onboarding'],
     ['membros', `Operadores${d ? ` (${d.membros.length})` : ''}`],
     ['faturas', `Faturas${d ? ` (${d.faturas.length})` : ''}`],
     ['terminais', `Terminais${d ? ` (${d.terminais.length})` : ''}`],
@@ -632,6 +633,7 @@ function EmpresaModal({ tenantId, onClose, showToast, onReload, onVerPlano }: { 
           {loading || !d ? <div style={{ padding: 30, textAlign: 'center', color: 'var(--c-ink3)' }}>Carregando dossiê…</div> : (
             <>
               {aba === 'geral' && <DossieGeral d={d} onVerPlano={() => { onClose(); onVerPlano(); }} onSaved={carregar} showToast={showToast} />}
+              {aba === 'onboarding' && <DossieOnboarding d={d} showToast={showToast} />}
               {aba === 'membros' && <DossieMembros membros={d.membros} plano={d.plano} />}
               {aba === 'faturas' && <DossieFaturas faturas={d.faturas} />}
               {aba === 'terminais' && <DossieTerminais terminais={d.terminais} />}
@@ -713,6 +715,97 @@ function InfoLinha({ k, v, cor }: { k: string; v: string; cor?: string }) {
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 0', borderBottom: '1px solid var(--c-border)' }}>
       <span style={{ color: 'var(--c-ink3)', fontSize: 13 }}>{k}</span>
       <span style={{ color: cor ?? 'var(--c-ink)', fontSize: 13, fontWeight: 600, textAlign: 'right' }}>{v}</span>
+    </div>
+  );
+}
+
+function DossieOnboarding({ d, showToast }: { d: Dossie; showToast: (t: ToastData) => void }) {
+  const t = d.tenant;
+  const t0 = d.terminais[0] || null; // O terminal inicial cadastrado no onboarding
+  const [verSenha, setVerSenha] = useState(false);
+  const [verMfa, setVerMfa] = useState(false);
+
+  const copiar = (texto: string, desc: string) => {
+    navigator.clipboard.writeText(texto);
+    showToast({ title: 'Copiado', msg: `${desc} copiado para a área de transferência.`, kind: 'ok' });
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div className="r-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 14 }}>
+        <Card style={{ padding: 16 }}>
+          <div style={{ color: 'var(--c-ink3)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 12 }}>
+            🏢 DADOS CADASTRAIS DA CLÍNICA
+          </div>
+          <InfoLinha k="Nome da Clínica" v={t.name || '—'} />
+          <InfoLinha k="CPF ou CNPJ" v={t.cnpj || '—'} />
+          <InfoLinha k="Responsável" v={t.responsavel || '—'} />
+          <InfoLinha k="Telefone / WhatsApp" v={t.telefone || '—'} />
+          <InfoLinha k="Cidade / UF" v={t.cidade ? `${t.cidade} / ${t.uf || ''}` : '—'} />
+          <InfoLinha k="Data de Cadastro" v={dmy(t.created_at)} />
+        </Card>
+
+        <Card style={{ padding: 16 }}>
+          <div style={{ color: 'var(--c-ink3)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 12 }}>
+            🤖 CONTA DE AUTOMAÇÃO INICIAL (CMD)
+          </div>
+          {t0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <InfoLinha k="Identificador (Label)" v={t0.label || '—'} />
+              <InfoLinha k="Usuário CMD-COLETA" v={t0.cmd_username || '—'} />
+              
+              {/* Senha CMD */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 0', borderBottom: '1px solid var(--c-border)', alignItems: 'center' }}>
+                <span style={{ color: 'var(--c-ink3)', fontSize: 13 }}>Senha CMD-COLETA</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ color: 'var(--c-ink)', fontSize: 13, fontWeight: 600, fontFamily: verSenha ? 'monospace' : 'inherit' }}>
+                    {verSenha ? (t0.cmd_password || '—') : '••••••••'}
+                  </span>
+                  {t0.cmd_password && (
+                    <>
+                      <button onClick={() => setVerSenha(!verSenha)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--c-ink3)', display: 'grid', placeItems: 'center', padding: 2 }}>
+                        {verSenha ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                      <button onClick={() => copiar(t0.cmd_password || '', 'Senha')} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--c-ink3)', display: 'grid', placeItems: 'center', padding: 2 }}>
+                        <Copy size={14} />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Chave 2FA */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 0', borderBottom: '1px solid var(--c-border)', alignItems: 'center' }}>
+                <span style={{ color: 'var(--c-ink3)', fontSize: 13 }}>Chave 2FA (MFA Secret)</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="ia-mono" style={{ color: 'var(--c-ink)', fontSize: 12, fontWeight: 600 }}>
+                    {verMfa ? (t0.mfa_secret || '—') : '••••••••'}
+                  </span>
+                  {t0.mfa_secret && (
+                    <>
+                      <button onClick={() => setVerMfa(!verMfa)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--c-ink3)', display: 'grid', placeItems: 'center', padding: 2 }}>
+                        {verMfa ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                      <button onClick={() => copiar(t0.mfa_secret || '', 'Chave 2FA')} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--c-ink3)', display: 'grid', placeItems: 'center', padding: 2 }}>
+                        <Copy size={14} />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Parâmetros de CID */}
+              <InfoLinha k="CID OCI (0 a 8 anos)" v={t0.cid_oci_0_8 || 'Não configurado'} />
+              <InfoLinha k="CID (Acima de 9 anos)" v={t0.cid_9_mais || 'Não configurado'} />
+              <InfoLinha k="CID Padrão" v={t0.cid_padrao || 'Não configurado'} />
+            </div>
+          ) : (
+            <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--c-ink3)', fontSize: 13 }}>
+              Nenhuma credencial/terminal CMD cadastrada no onboarding.
+            </div>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }
