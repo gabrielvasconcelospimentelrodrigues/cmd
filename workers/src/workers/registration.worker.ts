@@ -79,6 +79,10 @@ export function startRegistrationWorker(): Worker<UploadJob> {
         return;
       }
 
+      // SERIALIZA POR CONTA CMD: duas listas da MESMA conta NÃO podem rodar ao
+      // mesmo tempo — o CMD-COLETA só mantém 1 sessão por operador, então a 2ª
+      // sessão DERRUBA a 1ª e nenhuma conclui. A 2ª lista espera a vez.
+      const execucao = await withLock(`conta:${conta.id}`, async () => {
       const resultado = await withLock(`upload:${uploadId}`, async () => {
         const config = await getMotorConfig().catch(() => MOTOR_CONFIG_PADRAO);
         const loginTimeoutMs = config.login_timeout_segundos * 1000;
@@ -257,12 +261,17 @@ export function startRegistrationWorker(): Worker<UploadJob> {
           await acrescentarTempoAtivo(uploadId, (Date.now() - sessaoInicioMs) / 1000);
         }
       });
+      return resultado;
+      }); // fecha o lock por conta CMD
 
-      if (resultado === 'locked') {
-        // Esta MESMA lista já está sendo processada (job duplicado) — descarta.
+      if (execucao === 'locked') {
+        // Conta CMD ocupada por OUTRA lista (ou job duplicado desta) — espera a
+        // vez: re-enfileira. Evita 2 sessões simultâneas que se derrubam.
+        await registrationQueue.add('registrar', { uploadId }, { delay: 45_000 });
+        await logEntry(uploadId, 'INFO', 'Conta CMD ocupada por outra lista — aguardando a vez (o CMD só mantém 1 sessão por login).');
         return;
       }
-      if (resultado === 'done') {
+      if (execucao === 'done') {
         await verificationQueue.add('verificar', { uploadId }, { delay: 10_000 });
       }
     },
