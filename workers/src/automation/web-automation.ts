@@ -125,7 +125,13 @@ export interface AutomatorOpts {
   // Controles clínicos: CID escolhido pela idade (calculada da data de nascimento).
   cidOci0a8?: string; // paciente de OCI de 0 a 8 anos
   cid9Mais?: string; // paciente acima de 9 anos
+  // Corta o login no meio se o usuário parou/pausou/excluiu o envio — assim o
+  // laço de até 5 min não segue rodando "fantasma" com o navegador aberto.
+  abortou?: () => Promise<boolean>;
 }
+
+/** Login interrompido porque o usuário parou/excluiu o envio (não é erro real). */
+export class LoginAbortadoError extends Error {}
 
 export class WebAutomator {
   private browser: Browser | null = null;
@@ -359,6 +365,10 @@ export class WebAutomator {
     let dashboardOk = false;
     let tentativa = 0;
     while (Date.now() < prazo && !dashboardOk) {
+      // Parou/excluiu no meio do login? Aborta JÁ (não deixa fantasma rodando).
+      if (this.opts.abortou && await this.opts.abortou().catch(() => false)) {
+        throw new LoginAbortadoError('Login interrompido — envio parado/excluído pelo usuário.');
+      }
       tentativa++;
       const restanteMin = Math.max(0, Math.ceil((prazo - Date.now()) / 60_000));
       this.passo(`Abrindo CMD-COLETA (tentativa ${tentativa}, até ${restanteMin} min)...`);

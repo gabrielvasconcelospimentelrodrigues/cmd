@@ -8,7 +8,7 @@ import {
 import { proximaJanelaPermitida } from '../scheduling';
 import { withLock } from '../lib/lock';
 import { decrypt } from '../lib/crypto';
-import { WebAutomator, ProfessionalNotFoundError, type PatientData } from '../automation/web-automation';
+import { WebAutomator, ProfessionalNotFoundError, LoginAbortadoError, type PatientData } from '../automation/web-automation';
 import { getMotorConfig, MOTOR_CONFIG_PADRAO } from '../lib/motor-config';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -141,22 +141,30 @@ export function startRegistrationWorker(): Worker<UploadJob> {
             mfaSecret: decrypt(conta.mfa_secret_encrypted),
             uploadId,
             onStep: (d) => void setUploadStatus(uploadId, 'registering', { current_step: d }),
+            // Corta o login no meio se o usuário parou/pausou/excluiu (sem fantasma).
+            abortou: () => pausouOuParou(uploadId),
             // CID por idade (controles): 0–8 anos vs 9+ (fallback H53 dentro do motor).
             cidOci0a8: conta.cid_oci_0_8,
             cid9Mais: conta.cid_9_mais,
           });
           let precisaRetomar = false; // travou → pausa, alerta, retoma em 30s
+          let abortado = false; // usuário parou/excluiu durante o login → para limpo
           try {
             await automator.start();
             try {
               await comTimeout(automator.login(), loginTimeoutMs, 'login');
             } catch (e) {
-              await logEntry(uploadId, 'WARN', `⚠ Automação ${(e as Error).message} no login. Pausando e retomando em 30s de onde parou (${registered} já cadastrado(s)).`);
-              precisaRetomar = true;
+              if (e instanceof LoginAbortadoError) {
+                await logEntry(uploadId, 'WARN', 'Login interrompido — envio parado/excluído pelo usuário.');
+                abortado = true;
+              } else {
+                await logEntry(uploadId, 'WARN', `⚠ Automação ${(e as Error).message} no login. Pausando e retomando em 30s de onde parou (${registered} já cadastrado(s)).`);
+                precisaRetomar = true;
+              }
             }
 
             for (const p of pendentes) {
-              if (precisaRetomar) break;
+              if (abortado || precisaRetomar) break;
               if (await pausouOuParou(uploadId)) { await logEntry(uploadId, 'WARN', 'Interrompido pelo usuário.'); const real = await statusDoUpload(uploadId); await setUploadStatus(uploadId, real === 'paused' ? 'paused' : 'parado', { current_step: '' }); return 'parado'; }
               const pd: PatientData = {
                 cns: p.cns,
@@ -205,6 +213,14 @@ export function startRegistrationWorker(): Worker<UploadJob> {
             precisaRetomar = true;
           } finally {
             await automator.close();
+          }
+
+          if (abortado) {
+            // Parada/exclusão no meio do login: normaliza o status e ENCERRA
+            // (não reenfileira) — nada de fantasma rodando.
+            const real = await statusDoUpload(uploadId);
+            await setUploadStatus(uploadId, real === 'paused' ? 'paused' : 'parado', { current_step: '' });
+            return 'parado';
           }
 
           if (precisaRetomar) {
