@@ -2,7 +2,7 @@ import { Worker } from 'bullmq';
 import { bullConnection } from '../lib/redis';
 import { QUEUE, type UploadJob, registrationQueue } from '../queues';
 import { env } from '../config/env';
-import { logEntry, setUploadStatus, getUploadComConta, baixarArquivo, inserirPacientes } from '../lib/repo';
+import { logEntry, setUploadStatus, getUploadComConta, baixarArquivo, inserirPacientes, marcarFaltandoDados, marcarDuplicados } from '../lib/repo';
 import { extrairPacientes } from '../extractors';
 
 /**
@@ -35,12 +35,24 @@ export function startExtractionWorker(): Worker<UploadJob> {
 
       await setUploadStatus(uploadId, 'extracting', { current_step: 'Verificando dados obrigatórios...' });
       const total = await inserirPacientes(uploadId, upload.clinic_account_id, pacientes);
-      const incertos = pacientes.filter((p) => p.status === 'needs_review').length;
-      await setUploadStatus(uploadId, 'extracted', { patients_found: total, current_step: 'Aguardando cadastro...' });
+
+      // FILTRO UPFRONT (no nosso banco, rápido) — antes de qualquer automação:
+      // 1) barra quem não tem dado obrigatório (CNS/CPF, data, médico);
+      // 2) barra duplicados (mesmo CNS+data já cadastrado). Assim a automação só
+      //    tenta os pacientes VÁLIDOS e NOVOS — sem erro no formulário nem relogin.
+      const semDados = await marcarFaltandoDados(uploadId);
+      if (semDados > 0) await logEntry(uploadId, 'WARN', `${semDados} ficha(s) sem dado obrigatório (CNS/CPF, data ou médico) — enviada(s) para Pendências.`);
+
+      await setUploadStatus(uploadId, 'extracting', { current_step: 'Verificando duplicidades...' });
+      const dups = await marcarDuplicados(uploadId, upload.clinic_accounts?.tenant_id ?? 0);
+      if (dups > 0) await logEntry(uploadId, 'WARN', `${dups} duplicado(s) (já cadastrado no nosso sistema) — enviado(s) para Pendências, não serão recadastrados.`);
+
+      const prontos = Math.max(0, total - semDados - dups);
+      await setUploadStatus(uploadId, 'extracted', { patients_found: total, current_step: `Aguardando cadastro (${prontos} prontos)...` });
       await logEntry(
         uploadId,
         'INFO',
-        `Extração concluída: ${total} paciente(s)${incertos ? `, ${incertos} para revisão manual` : ''}.`,
+        `Extração concluída: ${total} ficha(s) — ${prontos} prontas para cadastrar, ${semDados + dups} em Pendências (${semDados} sem dados, ${dups} duplicadas).`,
       );
 
       // Agenda o registro respeitando o delay da clínica.

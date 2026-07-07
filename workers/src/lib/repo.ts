@@ -131,18 +131,82 @@ export async function jaCadastrado(clinicAccountId: number, cns: string, dataAte
  * repete dentro da própria lista. Os duplicados vão para PENDÊNCIAS
  * (needs_review) para tratamento manual. Retorna quantos foram marcados. */
 export async function marcarDuplicados(uploadId: number, tenantId: number): Promise<number> {
-  // Dedup no BANCO (função marcar_duplicados_upload): mesmo CNS + data já
-  // cadastrado no tenant, ou repetido na própria lista. Uma query só — rápido
-  // e completo (o caminho antigo em JS baixava tudo e travava no limite de 1000).
-  const { data, error } = await (supabaseAdmin as any).rpc('marcar_duplicados_upload', {
-    p_upload_id: uploadId,
-    p_tenant_id: tenantId,
-  });
-  if (error) {
-    console.error('[marcarDuplicados] rpc falhou:', error.message);
-    return 0;
+  const { data: pend } = await supabaseAdmin
+    .from('patient_records')
+    .select('id, cns, data_atendimento')
+    .eq('upload_id', uploadId)
+    .eq('status', 'pending_registration')
+    .order('id', { ascending: true });
+  const pendentes = (pend ?? []) as { id: number; cns: string | null; data_atendimento: string | null }[];
+  if (pendentes.length === 0) return 0;
+
+  const { data: cas } = await supabaseAdmin.from('clinic_accounts').select('id').eq('tenant_id', tenantId);
+  const caIds = (cas ?? []).map((c) => c.id);
+  const jaCad = new Set<string>();
+  if (caIds.length > 0) {
+    const { data: reg } = await supabaseAdmin
+      .from('patient_records')
+      .select('cns, data_atendimento')
+      .in('clinic_account_id', caIds)
+      .in('status', ['registered', 'verified_ok', 'verified_divergent', 'done_manually']);
+    for (const r of (reg ?? []) as { cns: string | null; data_atendimento: string | null }[]) {
+      if (r.cns && r.data_atendimento) jaCad.add(`${r.cns}|${r.data_atendimento}`);
+    }
   }
-  return Number(data ?? 0);
+
+  const vistos = new Set<string>();
+  const dupIds: number[] = [];
+  for (const p of pendentes) {
+    if (!p.cns || !p.data_atendimento) continue;
+    const chave = `${p.cns}|${p.data_atendimento}`;
+    if (jaCad.has(chave) || vistos.has(chave)) dupIds.push(p.id);
+    else vistos.add(chave);
+  }
+  if (dupIds.length > 0) {
+    await supabaseAdmin
+      .from('patient_records')
+      .update({ status: 'needs_review', error_message: 'Cadastro duplicado — mesmo CNS já cadastrado nesta data de atendimento.' })
+      .in('id', dupIds);
+  }
+  return dupIds.length;
+}
+
+/**
+ * Validação UPFRONT dos dados obrigatórios (antes de cadastrar): manda para
+ * Pendências (needs_review) quem não tem o mínimo para o formulário do CMD
+ * funcionar — CPF/CNS e médico. Sem isso, o cadastro quebra no meio do
+ * formulário e dispara o relogin ("sair com segurança").
+ * (Data de nascimento NÃO é obrigatória: o CMD a preenche via CADSUS pelo CNS.)
+ * Retorna quantos foram barrados. */
+export async function marcarFaltandoDados(uploadId: number): Promise<number> {
+  const { data: pend } = await supabaseAdmin
+    .from('patient_records')
+    .select('id, cns, medico_nome')
+    .eq('upload_id', uploadId)
+    .eq('status', 'pending_registration');
+  const pendentes = (pend ?? []) as { id: number; cns: string | null; medico_nome: string | null }[];
+
+  // Obrigatórios (definição do usuário): CPF/CNS e médico. Data de nascimento
+  // NÃO (vem do CADSUS pelo CNS); data de atendimento também não trava aqui.
+  const porMotivo: Record<string, number[]> = {};
+  for (const p of pendentes) {
+    const faltas: string[] = [];
+    if (!p.cns || !String(p.cns).trim()) faltas.push('CNS/CPF');
+    if (!p.medico_nome || !String(p.medico_nome).trim()) faltas.push('médico');
+    if (faltas.length) {
+      const msg = `Falta dado obrigatório: ${faltas.join(', ')}.`;
+      (porMotivo[msg] ??= []).push(p.id);
+    }
+  }
+  let total = 0;
+  for (const [msg, ids] of Object.entries(porMotivo)) {
+    await supabaseAdmin
+      .from('patient_records')
+      .update({ status: 'needs_review', error_message: msg })
+      .in('id', ids);
+    total += ids.length;
+  }
+  return total;
 }
 
 /** Atualiza o status de um paciente (e marca registered_at quando cadastrado). */
