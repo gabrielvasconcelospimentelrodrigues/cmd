@@ -799,6 +799,16 @@ export class WebAutomator {
     const equipe = this.valorOverride(overrides, 'equipe_saude');
     if (equipe) await this.selecionarNgAutocomplete('equipeSaude', equipe, equipe, 'app-procedimento');
 
+    // DIAGNÓSTICO: confere se os campos do procedimento estão realmente
+    // preenchidos ANTES de registrar (o usuário viu campos vazios ao vivo).
+    const vProc = await page.locator('app-procedimento ng-autocomplete[formcontrolname="procedimentoRealizado"] input').first().inputValue().catch(() => '');
+    const vProf = await page.locator('app-procedimento ng-autocomplete[formcontrolname="profissional"] input').first().inputValue().catch(() => '');
+    const vQtd = await page.locator('input[formcontrolname="quantidade"]').first().inputValue().catch(() => '');
+    T(`CAMPOS antes de registrar → procedimento='${vProc}' profissional='${vProf}' qtd='${vQtd}'`);
+    if (!vProc || !vProf) {
+      await this.capturarDebug(`proc_vazio_${codigo}`).catch(() => {});
+      T('!! CAMPO VAZIO no procedimento — screenshot salvo');
+    }
     await page.getByRole('button', { name: 'Registrar procedimento' }).click();
     T('Registrar procedimento CLICADO');
     // O clique pode disparar o alerta "alterar o procedimento" — confirma.
