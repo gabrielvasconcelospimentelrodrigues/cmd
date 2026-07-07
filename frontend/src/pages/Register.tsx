@@ -4,6 +4,7 @@ import { Sun, Moon, ArrowLeft } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { LogoMark, Field, PasswordField, useTheme, useToast, Toast } from '../components/iacmd/ui';
 import { AgentSphere } from '../components/iacmd/AgentSphere';
+import { mascaraCpfCnpj, validaCpfCnpj } from '../lib/documento';
 
 const emailRe = /.+@.+\..+/;
 
@@ -13,6 +14,7 @@ export default function Register() {
   const [toast, showToast] = useToast();
   const [nome, setNome] = useState('');
   const [clinica, setClinica] = useState('');
+  const [documento, setDocumento] = useState('');
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
   const [touched, setTouched] = useState(false);
@@ -21,6 +23,7 @@ export default function Register() {
   const erros = {
     nome: !nome.trim(),
     clinica: !clinica.trim(),
+    documento: !validaCpfCnpj(documento),
     email: !emailRe.test(email),
     pass: pass.length < 8,
   };
@@ -33,7 +36,7 @@ export default function Register() {
     const { data, error } = await supabase.auth.signUp({
       email,
       password: pass,
-      options: { data: { full_name: nome.trim(), clinic_name: clinica.trim() } },
+      options: { data: { full_name: nome.trim(), clinic_name: clinica.trim(), documento: documento.trim() } },
     });
     setLoading(false);
     if (error) return showToast({ title: 'Não foi possível criar a conta', msg: error.message, kind: 'err' });
@@ -108,6 +111,9 @@ export default function Register() {
               </Field>
               <Field label="Nome da clínica / operação" error={touched && erros.clinica ? 'Informe o nome da operação.' : undefined}>
                 <input className={`ia-input ${touched && erros.clinica ? 'err' : ''}`} value={clinica} onChange={(e) => setClinica(e.target.value)} placeholder="Ex: Saúde Itinerante LTDA" />
+              </Field>
+              <Field label="CPF / CNPJ" error={touched && erros.documento ? 'Informe um CPF ou CNPJ válido.' : undefined}>
+                <input className={`ia-input ia-mono ${touched && erros.documento ? 'err' : ''}`} value={documento} onChange={(e) => setDocumento(mascaraCpfCnpj(e.target.value))} placeholder="CPF ou CNPJ" inputMode="numeric" />
               </Field>
               <Field label="E-mail" error={touched && erros.email ? 'Confira o e-mail.' : undefined}>
                 <input className={`ia-input ${touched && erros.email ? 'err' : ''}`} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@clinica.com.br" />

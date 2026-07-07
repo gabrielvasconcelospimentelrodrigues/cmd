@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { apiPost } from '../lib/api';
 import { Shell, Field, PasswordField, useTheme, useToast, Toast } from '../components/iacmd/ui';
 import { extractSecretFromQr } from '../lib/otpauth';
+import { mascaraCpfCnpj, validaCpfCnpj } from '../lib/documento';
 
 const STEP_DATA = [
   { title: 'Conta CMD-COLETA', sub: 'E-mail e senha do governo' },
@@ -25,7 +26,7 @@ const MFA_STEPS = [
 
 export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) {
   const { session, signOut } = useAuth();
-  const meta = (session?.user.user_metadata ?? {}) as { clinic_name?: string; full_name?: string };
+  const meta = (session?.user.user_metadata ?? {}) as { clinic_name?: string; full_name?: string; documento?: string };
   const [theme, toggle] = useTheme();
   const [toast, showToast] = useToast();
 
@@ -45,7 +46,7 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
   const [manualKey, setManualKey] = useState('');
 
   const [clinicName, setClinicName] = useState(meta.clinic_name ?? '');
-  const [clinicCnpj, setClinicCnpj] = useState('');
+  const [clinicCnpj, setClinicCnpj] = useState(meta.documento ? mascaraCpfCnpj(meta.documento) : '');
   const [clinicResp, setClinicResp] = useState(meta.full_name ?? '');
   const [clinicPhone, setClinicPhone] = useState('');
   const [clinicCity, setClinicCity] = useState('');
@@ -92,7 +93,7 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
     } else if (step === 2) {
       if (mfaBad) return;
     } else if (step === 3) {
-      if (!clinicName.trim()) return;
+      if (!clinicName.trim() || !validaCpfCnpj(clinicCnpj)) return;
     } else if (step === 4) {
       if (regrasBad) return;
       setConfirmOpen(true);
@@ -278,7 +279,9 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
                       <input className={`ia-input ${touched && !clinicName.trim() ? 'err' : ''}`} value={clinicName} onChange={(e) => setClinicName(e.target.value)} placeholder="Ex: Saúde Itinerante LTDA" />
                     </Field>
                   </div>
-                  <Field label="CNPJ"><input className="ia-input ia-mono" value={clinicCnpj} onChange={(e) => setClinicCnpj(e.target.value)} placeholder="00.000.000/0001-00" /></Field>
+                  <Field label="CPF / CNPJ" error={touched && !validaCpfCnpj(clinicCnpj) ? 'Informe um CPF ou CNPJ válido.' : undefined}>
+                    <input className={`ia-input ia-mono ${touched && !validaCpfCnpj(clinicCnpj) ? 'err' : ''}`} value={clinicCnpj} onChange={(e) => setClinicCnpj(mascaraCpfCnpj(e.target.value))} placeholder="CPF ou CNPJ" inputMode="numeric" />
+                  </Field>
                   <Field label="Responsável"><input className="ia-input" value={clinicResp} onChange={(e) => setClinicResp(e.target.value)} placeholder="Ex: João Pereira" /></Field>
                   <Field label="Telefone / WhatsApp"><input className="ia-input" value={clinicPhone} onChange={(e) => setClinicPhone(e.target.value)} placeholder="(11) 99876-5432" /></Field>
                   <Field label="Cidade / UF base"><input className="ia-input" value={clinicCity} onChange={(e) => setClinicCity(e.target.value)} placeholder="Ex: Teresina / PI" /></Field>

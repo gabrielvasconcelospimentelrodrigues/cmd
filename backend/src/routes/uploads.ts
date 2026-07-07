@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { extractionQueue, registrationQueue } from '../lib/queue';
 import { gerarShortCode } from '../lib/shortcode';
 import { registrarLog, ator, atorNome } from '../lib/audit';
+import { analisarColunas, CAMPOS_OBRIGATORIOS } from '../lib/colunas';
 import type { Database, UploadOrigem } from '../types/database';
 
 const BUCKET = 'uploads';
@@ -65,6 +66,23 @@ async function marcarDuplicados(uploadId: number, tenantId: number): Promise<num
  * do usuário autenticado. Um usuário nunca enxerga/usa dados de outra clínica.
  */
 export async function uploadRoutes(app: FastifyInstance): Promise<void> {
+  // ---- Preview de COLUNAS do arquivo (para a tela de mapeamento manual) ------
+  // Lê só os cabeçalhos e devolve as colunas + sugestão automática por aliases.
+  // NÃO armazena nada — é só para montar o mapeamento antes de importar.
+  app.post('/uploads/colunas', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
+    const file = await req.file().catch(() => null);
+    if (!file) return reply.code(400).send({ error: 'Arquivo ausente.' });
+    const buffer = await file.toBuffer();
+    try {
+      const { colunas, sugestao } = await analisarColunas(buffer, file.filename);
+      if (colunas.length === 0) return reply.code(400).send({ error: 'Não consegui ler os cabeçalhos do arquivo. Verifique se a 1ª linha tem os nomes das colunas.' });
+      return { colunas, sugestao, obrigatorios: CAMPOS_OBRIGATORIOS };
+    } catch (e) {
+      req.log.error(e);
+      return reply.code(400).send({ error: 'Falha ao ler o arquivo. Formatos aceitos: CSV, Excel (.xlsx) ou XML.' });
+    }
+  });
+
   // ---- Criar upload (arquivo tabular) → Storage → fila de extração ----------
   app.post('/uploads', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
     const tenantId = req.tenant!.id;

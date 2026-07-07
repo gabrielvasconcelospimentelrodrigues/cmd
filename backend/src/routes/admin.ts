@@ -56,8 +56,27 @@ async function uploadsDoTenant(tenantId: number, campos = 'id'): Promise<any[]> 
  */
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/admin/tenants', { preHandler: app.authenticateSuperAdmin }, async () => {
-    const { data } = await supabaseAdmin.from('tenants').select('*').order('created_at', { ascending: false });
-    return data ?? [];
+    const { data: tenants } = await supabaseAdmin.from('tenants').select('*').order('created_at', { ascending: false });
+    const { data: empresas } = await supabaseAdmin.from('empresas').select('id, nome, tenant_id');
+    const { data: members } = await supabaseAdmin.from('tenant_members').select('id, nome, email, tenant_id, empresa_id');
+
+    const empsByTenant = new Map();
+    for (const e of (empresas ?? [])) {
+      if (!empsByTenant.has(e.tenant_id)) empsByTenant.set(e.tenant_id, []);
+      empsByTenant.get(e.tenant_id).push(e);
+    }
+
+    const membersByTenant = new Map();
+    for (const m of (members ?? [])) {
+      if (!membersByTenant.has(m.tenant_id)) membersByTenant.set(m.tenant_id, []);
+      membersByTenant.get(m.tenant_id).push(m);
+    }
+
+    return (tenants ?? []).map((t) => ({
+      ...t,
+      empresas: empsByTenant.get(t.id) ?? [],
+      membros: membersByTenant.get(t.id) ?? [],
+    }));
   });
 
   app.get('/admin/infra-metrics', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
@@ -121,8 +140,20 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       .select('*', { count: 'exact', head: true })
       .in('status', ['registering', 'extracting']);
     
-    const activeStreams = count ?? 0;
-    const networkBps = `${(activeStreams * 0.28 + 0.12).toFixed(2)} Mbps`;
+    // 5. Real SaaS stats
+    const { data: activeTenants } = await supabaseAdmin.from('tenants').select('id').eq('status', 'active');
+    let totalTerminais = 0;
+    let totalFaturamento = 0;
+    
+    if (activeTenants && activeTenants.length > 0) {
+      const planos = await Promise.all(activeTenants.map((t) => montarPlano(t.id)));
+      for (const p of planos) {
+        if (p) {
+          totalTerminais += p.total_terminais;
+          totalFaturamento += p.mensal;
+        }
+      }
+    }
 
     return {
       api: {
@@ -133,7 +164,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         memoryPct: systemMemPct,
         apiMemoryMb,
         uptime: os.uptime(),
-        networkBps
+        networkBps: 0
       },
       db: {
         status: 'connected',
@@ -145,7 +176,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         status: 'online',
         latencyMs: redisLatencyMs,
         memoryUsedFormatted: redisMemoryUsedFormatted,
-        activeStreams
+        activeStreams: 0
+      },
+      saas: {
+        totalTerminais,
+        totalFaturamento,
+        precoMedio: totalTerminais > 0 ? Math.round(totalFaturamento / totalTerminais) : 2000
       }
     };
   });
@@ -212,9 +248,26 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
   // MAPA do Brasil: distribuição de assinantes por UF (ativos/inativos).
   app.get('/admin/mapa', { preHandler: app.authenticateSuperAdmin }, async () => {
-    const { data } = await (supabaseAdmin as any).from('tenants').select('id, name, uf, cidade, status');
-    const rows = (data ?? []) as { id: number; name: string; uf: string | null; cidade: string | null; status: string }[];
-    const estados: Record<string, { ativos: number; inativos: number; total: number; assinantes: { name: string; cidade: string | null; ativo: boolean }[] }> = {};
+    const [{ data: tenants }, { data: empresas }, { data: members }] = await Promise.all([
+      (supabaseAdmin as any).from('tenants').select('id, name, uf, cidade, status'),
+      supabaseAdmin.from('empresas').select('id, nome, tenant_id'),
+      supabaseAdmin.from('tenant_members').select('id, nome, email, tenant_id'),
+    ]);
+
+    const empsByTenant = new Map();
+    for (const e of (empresas ?? [])) {
+      if (!empsByTenant.has(e.tenant_id)) empsByTenant.set(e.tenant_id, []);
+      empsByTenant.get(e.tenant_id).push(e.nome);
+    }
+
+    const membersByTenant = new Map();
+    for (const m of (members ?? [])) {
+      if (!membersByTenant.has(m.tenant_id)) membersByTenant.set(m.tenant_id, []);
+      membersByTenant.get(m.tenant_id).push(m.nome || m.email.split('@')[0]);
+    }
+
+    const rows = (tenants ?? []) as { id: number; name: string; uf: string | null; cidade: string | null; status: string }[];
+    const estados: Record<string, { ativos: number; inativos: number; total: number; assinantes: { name: string; cidade: string | null; ativo: boolean; membros: string[]; empresas: string[] }[] }> = {};
     let semUf = 0, totalAtivos = 0, totalInativos = 0;
     for (const r of rows) {
       const ativo = r.status === 'active';
@@ -224,7 +277,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       if (!estados[uf]) estados[uf] = { ativos: 0, inativos: 0, total: 0, assinantes: [] };
       estados[uf].total++;
       if (ativo) estados[uf].ativos++; else estados[uf].inativos++;
-      estados[uf].assinantes.push({ name: r.name, cidade: r.cidade, ativo });
+      
+      const tenantMembers = membersByTenant.get(r.id) ?? [];
+      const tenantEmps = empsByTenant.get(r.id) ?? [];
+      estados[uf].assinantes.push({ name: r.name, cidade: r.cidade, ativo, membros: tenantMembers, empresas: tenantEmps });
     }
     return {
       estados,
@@ -258,10 +314,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     ]);
     if (!tenant) return reply.code(404).send({ error: 'assinante não encontrado.' });
 
-    const [{ data: faturas }, { data: terminais }, { data: atividades }, envios] = await Promise.all([
+    const [{ data: faturas }, { data: terminais }, { data: atividades }, { data: members }, envios] = await Promise.all([
       (supabaseAdmin as any).from('faturas').select('id, tipo, descricao, referencia, valor, vencimento, status, pago_em, empresas(nome)').eq('tenant_id', id).order('vencimento', { ascending: false }),
-      (supabaseAdmin as any).from('clinic_accounts').select('id, label, cmd_username, is_enabled, empresa_id, last_run_at, last_run_status, cid_padrao').eq('tenant_id', id).order('id', { ascending: true }),
+      (supabaseAdmin as any).from('clinic_accounts').select('id, label, cmd_username, is_enabled, empresa_id, member_user_id, last_run_at, last_run_status, cid_padrao').eq('tenant_id', id).order('id', { ascending: true }),
       (supabaseAdmin as any).from('audit_logs').select('id, categoria, acao, descricao, nivel, actor_nome, criado_em').eq('tenant_id', id).order('criado_em', { ascending: false }).limit(60),
+      (supabaseAdmin as any).from('tenant_members').select('id, user_id, nome, email, role, empresa_id').eq('tenant_id', id),
       uploadsDoTenant(id, 'id, name, original_filename, status, uploaded_at, empresa_id, clinic_account_id, patients_found, patients_registered, patients_errored, registro_concluido_em, tempo_ativo_segundos, retry_rounds'),
     ]);
 
@@ -269,6 +326,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     // nomes das empresas (para rotular envios/terminais)
     const empNomes = new Map<number, string>();
     for (const e of plano?.empresas ?? []) empNomes.set(e.id, e.nome);
+
+    const memberNomes = new Map<string, string>();
+    for (const m of (members ?? [])) memberNomes.set(m.user_id, m.nome || m.email);
 
     const envList = (envios as any[]).sort((a, b) => (b.uploaded_at ?? '').localeCompare(a.uploaded_at ?? ''));
     const cadastrados = envList.reduce((s, u) => s + Number(u.patients_registered ?? 0), 0);
@@ -298,13 +358,22 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         proxima_vencimento: proxima ? { descricao: proxima.descricao, valor: Number(proxima.valor), vencimento: proxima.vencimento, vencida: proxima.vencimento < hoje } : null,
       },
       faturas: fats.map((f) => ({ ...f, valor: Number(f.valor), empresa_nome: f.empresas?.nome ?? null, vencida: f.status === 'aberto' && f.vencimento < hoje })),
-      terminais: (terminais ?? []).map((t: any) => ({ ...t, empresa_nome: empNomes.get(t.empresa_id) ?? null })),
+      terminais: (terminais ?? []).map((t: any) => ({ ...t, empresa_nome: empNomes.get(t.empresa_id) ?? null, membro_nome: memberNomes.get(t.member_user_id) ?? null })),
       envios: envList.map((u) => ({
         id: u.id, nome: u.name || u.original_filename || `lista #${u.id}`, status: u.status,
         empresa_nome: empNomes.get(u.empresa_id) ?? null, uploaded_at: u.uploaded_at,
         encontrados: Number(u.patients_found ?? 0), cadastrados: Number(u.patients_registered ?? 0),
         erros: Number(u.patients_errored ?? 0), concluido_em: u.registro_concluido_em,
         retry_rounds: Number(u.retry_rounds ?? 0), tempo_ativo_segundos: Number(u.tempo_ativo_segundos ?? 0),
+      })),
+      membros: (members ?? []).map((m: any) => ({
+        id: m.id,
+        user_id: m.user_id,
+        nome: m.nome,
+        email: m.email,
+        role: m.role,
+        empresa_id: m.empresa_id,
+        cmd_conectado: (terminais ?? []).some((t: any) => t.member_user_id === m.user_id),
       })),
       atividades: atividades ?? [],
     };
@@ -600,21 +669,66 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get('/admin/users', { preHandler: app.authenticateSuperAdmin }, async () => {
     const { data } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 });
     const { data: tenants } = await supabaseAdmin.from('tenants').select('id, name, owner_user_id, status');
+    const { data: members } = await (supabaseAdmin as any).from('tenant_members').select('user_id, empresa_id, empresas(nome), tenants(id, name, status)');
+    const { data: allEmpresas } = await supabaseAdmin.from('empresas').select('id, nome, tenant_id');
+
     const byOwner = new Map((tenants ?? []).map((t) => [t.owner_user_id, t]));
+    const memberMap = new Map<string, any>(((members ?? []) as any[]).map((m: any) => [m.user_id, m]));
+    const empresasByTenant = new Map();
+    for (const emp of (allEmpresas ?? [])) {
+      if (!empresasByTenant.has(emp.tenant_id)) empresasByTenant.set(emp.tenant_id, []);
+      empresasByTenant.get(emp.tenant_id).push(emp.nome);
+    }
+
     return (data?.users ?? []).map((u) => {
       const meta = (u.user_metadata ?? {}) as { full_name?: string };
       const role = (u.app_metadata as { role?: string } | null)?.role;
-      const t = byOwner.get(u.id);
       const banido = !!(u as { banned_until?: string }).banned_until && new Date((u as { banned_until?: string }).banned_until!) > new Date();
+
+      const t = byOwner.get(u.id);
+      const m = memberMap.get(u.id);
+
+      let empresasList: string[] = [];
+      let tenantId: number | null = null;
+      let tenantStatus: string | null = null;
+      let displayEmpresa = '—';
+      let displayRole = 'Admin';
+      let displayRoleKey = 'admin';
+
+      if (role === 'super_admin') {
+        empresasList = ['IACMD'];
+        displayEmpresa = 'IACMD';
+        displayRole = 'Super admin';
+        displayRoleKey = 'super_admin';
+      } else if (t) {
+        tenantId = t.id;
+        tenantStatus = t.status;
+        empresasList = empresasByTenant.get(t.id) ?? [];
+        displayEmpresa = t.name;
+      } else if (m) {
+        tenantId = m.tenants?.id ?? null;
+        tenantStatus = m.tenants?.status ?? null;
+        if (m.empresas?.nome) {
+          empresasList = [m.empresas.nome];
+          displayEmpresa = m.empresas.nome;
+        } else if (m.tenants?.name) {
+          empresasList = [];
+          displayEmpresa = m.tenants.name + ' (Membro)';
+        }
+        displayRole = m.role === 'admin' ? 'Admin' : 'Operador';
+        displayRoleKey = m.role;
+      }
+
       return {
         id: u.id,
-        nome: meta.full_name || u.email?.split('@')[0] || '—',
+        nome: meta.full_name || (m && m.nome) || u.email?.split('@')[0] || '—',
         email: u.email ?? '—',
-        empresa: t?.name ?? (role === 'super_admin' ? 'IACMD' : '—'),
-        tenant_id: t?.id ?? null,
-        tenant_status: t?.status ?? null,
-        role: role === 'super_admin' ? 'Super admin' : 'Admin',
-        role_key: role === 'super_admin' ? 'super_admin' : 'admin',
+        empresa: displayEmpresa,
+        empresas_list: empresasList,
+        tenant_id: tenantId,
+        tenant_status: tenantStatus,
+        role: displayRole,
+        role_key: displayRoleKey,
         ativo: !banido,
         banido,
         confirmado: !!u.email_confirmed_at,

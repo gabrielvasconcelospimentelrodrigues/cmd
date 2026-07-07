@@ -3,6 +3,7 @@ import { Building2, Cpu, Plus, CheckCircle2, Clock, X, Users, Trash2, UserPlus, 
 import { apiGet, apiPost, apiDelete, apiPatch } from '../../lib/api';
 import type { Plano, Tenant, TerminalRequest, Fatura, TenantMember, ClinicAccount } from '../../lib/types';
 import { Card, brl } from './parts';
+import { mascaraCpfCnpj, validaCpfCnpj } from '../../lib/documento';
 
 type ToastData = { title: string; msg: string; kind: 'ok' | 'err' };
 
@@ -624,6 +625,7 @@ function NovaEmpresaModal({ onClose, onSaved, onErr }: { onClose: () => void; on
   const [busy, setBusy] = useState(false);
   const salvar = async () => {
     if (!nome.trim()) return onErr('Informe o nome da empresa.');
+    if (!validaCpfCnpj(cnpj)) return onErr('Informe um CPF ou CNPJ válido.');
     setBusy(true);
     try { await apiPost('/empresas', { nome: nome.trim(), cnpj: cnpj.trim() }); await onSaved(); } catch (e) { onErr((e as Error).message); setBusy(false); }
   };
@@ -638,8 +640,8 @@ function NovaEmpresaModal({ onClose, onSaved, onErr }: { onClose: () => void; on
         <p style={{ color: 'var(--c-ink3)', fontSize: 13, margin: '10px 0 18px' }}>As empresas organizam seus terminais e automações. Novos terminais contratados são associados a uma empresa.</p>
         <label className="ia-label">Nome da empresa</label>
         <input value={nome} onChange={(e) => setNome(e.target.value)} className="ia-input" placeholder="Ex: Clínica Visão Norte" autoFocus />
-        <label className="ia-label" style={{ marginTop: 14 }}>CNPJ (opcional)</label>
-        <input value={cnpj} onChange={(e) => setCnpj(e.target.value)} className="ia-input ia-mono" placeholder="00.000.000/0001-00" />
+        <label className="ia-label" style={{ marginTop: 14 }}>CPF / CNPJ</label>
+        <input value={cnpj} onChange={(e) => setCnpj(mascaraCpfCnpj(e.target.value))} className="ia-input ia-mono" placeholder="CPF ou CNPJ" inputMode="numeric" />
         <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
           <button onClick={onClose} className="ia-btn-outline" style={{ flex: 1 }}>Cancelar</button>
           <button onClick={salvar} disabled={busy} className="ia-btn" style={{ flex: 1, justifyContent: 'center' }}>{busy ? 'Salvando…' : 'Cadastrar'}</button>

@@ -11,8 +11,8 @@ import { Switch, brl } from './painel/parts';
 import type { Plano, TerminalRequest, Fatura } from '../lib/types';
 
 type Page = 'overview' | 'auth' | 'empresas' | 'usuarios' | 'financeiro' | 'planos' | 'infra' | 'logs' | 'regras';
-interface T { id: number; name: string; status: string; responsavel: string | null; cidade: string | null; created_at: string }
-interface U { id: string; nome: string; email: string; empresa: string; tenant_id: number | null; tenant_status: string | null; role: string; role_key: 'admin' | 'super_admin'; ativo: boolean; banido: boolean; confirmado: boolean; ultimo_acesso: string | null; criado_em: string | null }
+interface T { id: number; name: string; status: string; responsavel: string | null; cidade: string | null; created_at: string; empresas?: { id: number; nome: string }[]; membros?: { id: number; nome: string | null; email: string }[] }
+interface U { id: string; nome: string; email: string; empresa: string; empresas_list?: string[]; tenant_id: number | null; tenant_status: string | null; role: string; role_key: string; ativo: boolean; banido: boolean; confirmado: boolean; ultimo_acesso: string | null; criado_em: string | null }
 interface Stats { empresasAtivas: number; pendentes: number; totalEmpresas: number; fichasRede: number }
 
 const NAV: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
@@ -206,7 +206,7 @@ const UF_NOME: Record<string, string> = {
   AC: 'Acre', AL: 'Alagoas', AP: 'Amapá', AM: 'Amazonas', BA: 'Bahia', CE: 'Ceará', DF: 'Distrito Federal', ES: 'Espírito Santo', GO: 'Goiás', MA: 'Maranhão', MT: 'Mato Grosso', MS: 'Mato Grosso do Sul', MG: 'Minas Gerais', PA: 'Pará', PB: 'Paraíba', PR: 'Paraná', PE: 'Pernambuco', PI: 'Piauí', RJ: 'Rio de Janeiro', RN: 'Rio Grande do Norte', RS: 'Rio Grande do Sul', RO: 'Rondônia', RR: 'Roraima', SC: 'Santa Catarina', SP: 'São Paulo', SE: 'Sergipe', TO: 'Tocantins',
 };
 
-interface MapaEstado { ativos: number; inativos: number; total: number; assinantes: { name: string; cidade: string | null; ativo: boolean }[] }
+interface MapaEstado { ativos: number; inativos: number; total: number; assinantes: { name: string; cidade: string | null; ativo: boolean; membros: string[]; empresas?: string[] }[] }
 interface MapaResp { estados: Record<string, MapaEstado>; resumo: { total: number; ativos: number; inativos: number; sem_uf: number; estados_com_uso: number } }
 
 function BrazilMap({ estados, maxAtivos, onHover, hover }: { estados: Record<string, MapaEstado>; maxAtivos: number; onHover: (uf: string | null) => void; hover: string | null }) {
@@ -336,9 +336,21 @@ function MapaBrasilSection({ onGo }: { onGo: (p: Page) => void }) {
                 <span style={{ color: 'var(--c-warnfg)', fontSize: 13, fontWeight: 700 }}>{eHover.inativos} inativo(s)</span>
               </div>
               {eHover.assinantes.slice(0, 6).map((a, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 13 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: a.ativo ? 'var(--c-ok)' : 'var(--c-warn)', flex: 'none' }} />
-                  <span style={{ color: 'var(--c-ink2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}{a.cidade ? ` · ${a.cidade}` : ''}</span>
+                <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '6px 0', borderBottom: i < eHover.assinantes.slice(0, 6).length - 1 ? '1px dashed var(--c-border)' : 'none' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: a.ativo ? 'var(--c-ok)' : 'var(--c-warn)', flex: 'none' }} />
+                    <span style={{ color: 'var(--c-ink2)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}{a.cidade ? ` · ${a.cidade}` : ''}</span>
+                  </div>
+                  {a.empresas && a.empresas.length > 0 && (
+                    <div style={{ color: 'var(--c-ink3)', fontSize: 11.5, paddingLeft: 14, fontWeight: 500 }}>
+                      Empresas: {a.empresas.join(', ')}
+                    </div>
+                  )}
+                  {a.membros && a.membros.length > 0 && (
+                    <div style={{ color: 'var(--c-ink3)', fontSize: 11, paddingLeft: 14 }}>
+                      Membros: {a.membros.join(', ')}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -473,7 +485,15 @@ function Empresas({ tenants, showToast, onReload, onAction, onVerPlano }: { tena
     if (status !== 'todos' && t.status !== status) return false;
     if (busca.trim()) {
       const q = busca.trim().toLowerCase();
-      if (!(`${t.name} ${t.responsavel ?? ''} ${t.cidade ?? ''}`.toLowerCase().includes(q))) return false;
+      const hasMemberMatch = t.membros?.some((m) =>
+        `${m.nome || ''} ${m.email}`.toLowerCase().includes(q)
+      );
+      if (
+        !(`${t.name} ${t.responsavel ?? ''} ${t.cidade ?? ''}`.toLowerCase().includes(q)) &&
+        !hasMemberMatch
+      ) {
+        return false;
+      }
     }
     return true;
   });
@@ -487,7 +507,7 @@ function Empresas({ tenants, showToast, onReload, onAction, onVerPlano }: { tena
           {([['todos', `Todos (${tenants.length})`], ['active', `Ativos (${cont('active')})`], ['pending_approval', `Pendentes (${cont('pending_approval')})`], ['suspended', `Suspensos (${cont('suspended')})`]] as const).map(([k, lbl]) => (
             <button key={k} onClick={() => setStatus(k)} style={{ border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: status === k ? 700 : 500, padding: '6px 12px', borderRadius: 8, background: status === k ? 'var(--c-soft)' : 'var(--c-surface2)', color: status === k ? 'var(--c-softfg)' : 'var(--c-ink3)' }}>{lbl}</button>
           ))}
-          <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome, responsável, cidade…" className="ia-input" style={{ flex: '1 1 200px', minWidth: 180, height: 38, fontSize: 13, marginLeft: 'auto' }} />
+          <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome, responsável, cidade ou operador…" className="ia-input" style={{ flex: '1 1 200px', minWidth: 180, height: 38, fontSize: 13, marginLeft: 'auto' }} />
         </div>
       </Card>
 
@@ -501,7 +521,14 @@ function Empresas({ tenants, showToast, onReload, onAction, onVerPlano }: { tena
             <div key={t.id} style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr .9fr 120px 150px', gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--c-border)', alignItems: 'center' }}>
               <button onClick={() => setAberto(t.id)} style={{ display: 'flex', alignItems: 'center', gap: 11, border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', padding: 0, minWidth: 0 }}>
                 <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--c-soft)', color: 'var(--c-blue)', fontWeight: 700, fontSize: 12, display: 'grid', placeItems: 'center', flex: 'none' }}>{initials(t.name)}</div>
-                <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+                <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                  <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+                  {t.membros && t.membros.length > 0 && (
+                    <span style={{ color: 'var(--c-ink3)', fontSize: 11, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      Operadores: {t.membros.map((m) => m.nome || m.email.split('@')[0]).join(', ')}
+                    </span>
+                  )}
+                </div>
               </button>
               <span style={{ color: 'var(--c-ink2)', fontSize: 13 }}>{t.responsavel || '—'}</span>
               <span style={{ color: 'var(--c-ink2)', fontSize: 13 }}>{t.cidade || '—'}</span>
@@ -528,11 +555,12 @@ interface Dossie {
   plano: { mensal: number; total_terminais: number; nao_alocados: number; valor_terminal: number; valor_implantacao: number; implantacao_paga: boolean; empresas: { id: number; nome: string; terminais: number; mensal: number }[] } | null;
   resumo: { envios_total: number; envios_concluidos: number; cadastrados: number; erros: number; encontrados: number; taxa_pct: number; tempo_ativo_segundos: number; terminais_conectados: number; em_aberto: number; vencido: number; inadimplente: boolean; proxima_vencimento: { descricao: string; valor: number; vencimento: string; vencida: boolean } | null };
   faturas: { id: number; tipo: string; descricao: string | null; referencia: string; valor: number; vencimento: string; status: string; empresa_nome: string | null; vencida: boolean }[];
-  terminais: { id: number; label: string | null; cmd_username: string | null; is_enabled: boolean; empresa_nome: string | null; last_run_at: string | null; last_run_status: string | null; cid_padrao: string | null }[];
+  terminais: { id: number; label: string | null; cmd_username: string | null; is_enabled: boolean; empresa_nome: string | null; membro_nome: string | null; last_run_at: string | null; last_run_status: string | null; cid_padrao: string | null }[];
   envios: { id: number; nome: string; status: string; empresa_nome: string | null; uploaded_at: string; encontrados: number; cadastrados: number; erros: number; concluido_em: string | null; retry_rounds: number; tempo_ativo_segundos: number }[];
+  membros: { id: number; user_id: string; nome: string | null; email: string; role: string; empresa_id: number | null; cmd_conectado?: boolean }[];
   atividades: { id: number; categoria: string; acao: string; descricao: string; nivel: string; actor_nome: string | null; criado_em: string }[];
 }
-type AbaDossie = 'geral' | 'faturas' | 'terminais' | 'envios' | 'atividades';
+type AbaDossie = 'geral' | 'membros' | 'faturas' | 'terminais' | 'envios' | 'atividades';
 
 const dmy = (iso: string | null) => iso ? iso.slice(0, 10).split('-').reverse().join('/') : '—';
 const dmyHora = (iso: string | null) => { if (!iso) return '—'; const d = new Date(iso); return `${dmy(iso)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
@@ -563,7 +591,14 @@ function EmpresaModal({ tenantId, onClose, showToast, onReload, onVerPlano }: { 
 
   const t = d?.tenant;
   const p = t ? statusPill(t.status) : null;
-  const ABAS: [AbaDossie, string][] = [['geral', 'Visão geral'], ['faturas', `Faturas${d ? ` (${d.faturas.length})` : ''}`], ['terminais', `Terminais${d ? ` (${d.terminais.length})` : ''}`], ['envios', `Envios${d ? ` (${d.envios.length})` : ''}`], ['atividades', `Atividades${d ? ` (${d.atividades.length})` : ''}`]];
+  const ABAS: [AbaDossie, string][] = [
+    ['geral', 'Visão geral'],
+    ['membros', `Operadores${d ? ` (${d.membros.length})` : ''}`],
+    ['faturas', `Faturas${d ? ` (${d.faturas.length})` : ''}`],
+    ['terminais', `Terminais${d ? ` (${d.terminais.length})` : ''}`],
+    ['envios', `Envios${d ? ` (${d.envios.length})` : ''}`],
+    ['atividades', `Atividades${d ? ` (${d.atividades.length})` : ''}`]
+  ];
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 95, background: 'rgba(7,11,22,.62)', backdropFilter: 'blur(3px)', display: 'grid', placeItems: 'center', padding: 20 }}>
@@ -597,6 +632,7 @@ function EmpresaModal({ tenantId, onClose, showToast, onReload, onVerPlano }: { 
           {loading || !d ? <div style={{ padding: 30, textAlign: 'center', color: 'var(--c-ink3)' }}>Carregando dossiê…</div> : (
             <>
               {aba === 'geral' && <DossieGeral d={d} onVerPlano={() => { onClose(); onVerPlano(); }} onSaved={carregar} showToast={showToast} />}
+              {aba === 'membros' && <DossieMembros membros={d.membros} plano={d.plano} />}
               {aba === 'faturas' && <DossieFaturas faturas={d.faturas} />}
               {aba === 'terminais' && <DossieTerminais terminais={d.terminais} />}
               {aba === 'envios' && <DossieEnvios envios={d.envios} />}
@@ -702,6 +738,32 @@ function DossieFaturas({ faturas }: { faturas: Dossie['faturas'] }) {
   );
 }
 
+function DossieMembros({ membros, plano }: { membros: Dossie['membros']; plano: Dossie['plano'] }) {
+  if (membros.length === 0) return <Vazio>Nenhum operador cadastrado.</Vazio>;
+ 
+  const empNomes = new Map<number, string>();
+  for (const e of plano?.empresas ?? []) empNomes.set(e.id, e.nome);
+ 
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {membros.map((m) => (
+        <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '11px 4px', borderBottom: '1px solid var(--c-border)' }}>
+          <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'linear-gradient(135deg,#2563EB,#38BDF8)', color: '#fff', fontWeight: 700, fontSize: 12, display: 'grid', placeItems: 'center', flex: 'none' }}>{initials(m.nome || m.email)}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 600 }}>{m.nome || m.email.split('@')[0]}</div>
+            <div style={{ color: 'var(--c-ink3)', fontSize: 12 }}>
+              {m.email} · Empresa: <strong>{m.empresa_id ? (empNomes.get(m.empresa_id) || 'Carregando...') : 'Todas'}</strong>
+            </div>
+          </div>
+          <span style={{ fontSize: 12, fontWeight: 600, color: m.role === 'admin' ? 'var(--c-warnfg)' : 'var(--c-softfg)', background: m.role === 'admin' ? 'var(--c-warnsoft)' : 'var(--c-soft)', padding: '3px 10px', borderRadius: 999 }}>
+            {m.role === 'admin' ? 'Admin' : 'Operador'}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+ 
 function DossieTerminais({ terminais }: { terminais: Dossie['terminais'] }) {
   if (terminais.length === 0) return <Vazio>Nenhum terminal (login CMD) conectado.</Vazio>;
   return (
@@ -711,7 +773,12 @@ function DossieTerminais({ terminais }: { terminais: Dossie['terminais'] }) {
           <span style={{ width: 8, height: 8, borderRadius: '50%', flex: 'none', background: t.is_enabled ? 'var(--c-ok)' : 'var(--c-ink3)' }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 600 }}>{t.label || t.cmd_username || `terminal #${t.id}`}</div>
-            <div style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{t.empresa_nome || 'sem empresa'}{t.cid_padrao ? ` · CID ${t.cid_padrao}` : ''} · última execução {dmyHora(t.last_run_at)}</div>
+            <div style={{ color: 'var(--c-ink3)', fontSize: 12 }}>
+              {t.empresa_nome || 'sem empresa'}
+              {t.membro_nome ? ` · Operador: ${t.membro_nome}` : ' · Livre para todos'}
+              {t.cid_padrao ? ` · CID ${t.cid_padrao}` : ''}
+              {' · última execução ' + dmyHora(t.last_run_at)}
+            </div>
           </div>
           <span style={{ fontSize: 12, fontWeight: 600, color: t.is_enabled ? 'var(--c-okfg)' : 'var(--c-ink3)' }}>{t.is_enabled ? 'ativo' : 'desativado'}</span>
         </div>
@@ -771,6 +838,7 @@ function Usuarios({ users, showToast, onReload, meId }: { users: U[]; showToast:
   const [papel, setPapel] = useState('todos');
   const [status, setStatus] = useState('todos');
   const [busca, setBusca] = useState('');
+  const [filtroEmpresa, setFiltroEmpresa] = useState('');
   const [editar, setEditar] = useState<U | 'novo' | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
   const [link, setLink] = useState<{ titulo: string; url: string } | null>(null);
@@ -780,7 +848,12 @@ function Usuarios({ users, showToast, onReload, meId }: { users: U[]; showToast:
     if (papel !== 'todos' && u.role_key !== papel) return false;
     if (status === 'ativos' && !u.ativo) return false;
     if (status === 'bloqueados' && u.ativo) return false;
-    if (busca.trim() && !`${u.nome} ${u.email} ${u.empresa}`.toLowerCase().includes(busca.trim().toLowerCase())) return false;
+    if (filtroEmpresa && u.empresa !== filtroEmpresa) return false;
+    if (busca.trim()) {
+      const q = busca.trim().toLowerCase();
+      const matchTags = u.empresas_list?.some((tag) => tag.toLowerCase().includes(q));
+      if (!`${u.nome} ${u.email} ${u.empresa}`.toLowerCase().includes(q) && !matchTags) return false;
+    }
     return true;
   });
 
@@ -804,6 +877,7 @@ function Usuarios({ users, showToast, onReload, meId }: { users: U[]; showToast:
   };
 
   const cont = (fn: (u: U) => boolean) => users.filter(fn).length;
+  const uniqueEmpresas = Array.from(new Set(users.map((u) => u.empresa).filter((emp) => emp && emp !== '—')));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }} onClick={() => setMenu(null)}>
@@ -817,14 +891,22 @@ function Usuarios({ users, showToast, onReload, meId }: { users: U[]; showToast:
           {([['todos', 'Todos'], ['ativos', `Ativos (${cont((u) => u.ativo)})`], ['bloqueados', `Bloqueados (${cont((u) => !u.ativo)})`]] as const).map(([k, lbl]) => (
             <button key={k} onClick={() => setStatus(k)} style={pillBtn(status === k)}>{lbl}</button>
           ))}
-          <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar nome, e-mail, empresa…" className="ia-input" style={{ flex: '1 1 180px', minWidth: 160, height: 38, fontSize: 13 }} />
+          
+          <select value={filtroEmpresa} onChange={(e) => setFiltroEmpresa(e.target.value)} className="ia-input" style={{ width: 180, height: 38, fontSize: 13, padding: '0 8px', borderRadius: 8 }}>
+            <option value="">Todas as empresas</option>
+            {uniqueEmpresas.map((emp) => (
+              <option key={emp} value={emp}>{emp}</option>
+            ))}
+          </select>
+
+          <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar nome, e-mail, empresa ou tag…" className="ia-input" style={{ flex: '1 1 180px', minWidth: 160, height: 38, fontSize: 13 }} />
           <button onClick={() => setEditar('novo')} className="ia-btn" style={{ height: 38, padding: '0 14px', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 7 }}><UserPlus size={16} /> Novo usuário</button>
         </div>
       </Card>
 
       <Card className="r-scroll-x" style={{ overflow: 'visible' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.1fr 120px 120px 46px', gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)', fontSize: 12, fontWeight: 600, color: 'var(--c-ink3)', textTransform: 'uppercase', letterSpacing: '.04em', borderRadius: '14px 14px 0 0' }}>
-          <span>Usuário</span><span>Empresa</span><span>Papel</span><span>Status</span><span />
+          <span>Usuário</span><span>Empresa / Tags</span><span>Papel</span><span>Status</span><span />
         </div>
         {filtrados.length === 0 ? <div style={{ padding: 40, textAlign: 'center', color: 'var(--c-ink3)' }}>Nenhum usuário neste filtro.</div> : filtrados.map((u) => (
           <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.1fr 120px 120px 46px', gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--c-border)', alignItems: 'center', position: 'relative' }}>
@@ -835,7 +917,18 @@ function Usuarios({ users, showToast, onReload, meId }: { users: U[]; showToast:
                 <div className="ia-mono" style={{ color: 'var(--c-ink3)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
               </div>
             </div>
-            <span style={{ color: 'var(--c-ink2)', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.empresa}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+              <span style={{ color: 'var(--c-ink2)', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.empresa}</span>
+              {u.empresas_list && u.empresas_list.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {u.empresas_list.map((empName) => (
+                    <span key={empName} style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: 'var(--c-soft)', color: 'var(--c-softfg)' }}>
+                      {empName}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
             <span style={{ color: u.role_key === 'super_admin' ? 'var(--c-warnfg)' : 'var(--c-softfg)', background: u.role_key === 'super_admin' ? 'var(--c-warnsoft)' : 'var(--c-soft)', fontSize: 12, fontWeight: 600, padding: '3px 10px', borderRadius: 999, justifySelf: 'start' }}>{u.role}</span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: u.ativo ? 'var(--c-okfg)' : 'var(--c-errfg)', fontSize: 12, fontWeight: 600 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: u.ativo ? 'var(--c-ok)' : 'var(--c-err)' }} />{u.ativo ? 'Ativo' : 'Bloqueado'}</span>
             <div style={{ justifySelf: 'end', position: 'relative' }}>
@@ -875,7 +968,7 @@ function UserModal({ alvo, onClose, showToast, onReload, onLink }: { alvo: U | '
   const u = novo ? null : alvo;
   const [nome, setNome] = useState(u?.nome ?? '');
   const [email, setEmail] = useState(u?.email ?? '');
-  const [role, setRole] = useState<'admin' | 'super_admin'>(u?.role_key ?? 'admin');
+  const [role, setRole] = useState<'admin' | 'super_admin'>((u?.role_key as 'admin' | 'super_admin') ?? 'admin');
   const [senha, setSenha] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -1843,13 +1936,18 @@ interface InfraMetrics {
     memoryUsedFormatted: string;
     activeStreams: number;
   };
+  saas?: {
+    totalTerminais: number;
+    totalFaturamento: number;
+    precoMedio: number;
+  };
 }
 
 function Infra() {
   const [metrics, setMetrics] = useState<InfraMetrics | null>(null);
   const [loading, setLoading] = useState(true);
-  const [terminais, setTerminais] = useState(25);
-  const [preco, setPreco] = useState(2000);
+  const [terminais, setTerminais] = useState(0);
+  const [preco, setPreco] = useState(0);
 
   useEffect(() => {
     const carregarMetricas = () => {
@@ -1857,6 +1955,8 @@ function Infra() {
         .then((m) => {
           setMetrics(m);
           setLoading(false);
+          setTerminais((prev) => prev === 0 && m.saas ? m.saas.totalTerminais : prev || 25);
+          setPreco((prev) => prev === 0 && m.saas ? m.saas.precoMedio : prev || 2000);
         })
         .catch(() => {});
     };
@@ -1865,8 +1965,10 @@ function Infra() {
     return () => clearInterval(t);
   }, []);
 
-  const custoFixo = 185;
-  const custoVpsPorTerminal = 45;
+  const dolarTaxa = 5.5;
+  const custoFixoUsd = 18; // API Droplet real cost
+  const custoFixo = custoFixoUsd * dolarTaxa;
+  const custoVpsPorTerminal = 0; // Terminais rodam sob a mesma infraestrutura, custo extra por terminal = R$ 0
 
   const faturamento = terminais * preco;
   const custoRobos = terminais * custoVpsPorTerminal;
@@ -1984,10 +2086,10 @@ function Infra() {
           <p style={{ color: 'var(--c-ink3)', fontSize: 13, margin: 0 }}>Parâmetros práticos de hardware para saber quando escalar a infraestrutura central:</p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 4 }}>
-            <div style={{ borderLeft: '3px solid #3B82F6', paddingLeft: 12 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--c-ink)' }}>Fase 1: Droplet Básico ($12/mês - 2GB RAM, 1 CPU)</div>
-              <div style={{ fontSize: 12, color: 'var(--c-ink3)', marginTop: 4 }}>
-                Suporta até <strong>100 robôs em segundo plano</strong> ou <strong>15 telas ao vivo simultâneas</strong>. Recomendado para o início.
+            <div style={{ borderLeft: '3px solid #3B82F6', paddingLeft: 12, background: 'var(--c-oksoft)', borderRadius: 8, padding: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--c-okfg)' }}>Fase 1: Droplet Atual ($18/mês - 2GB RAM, 1 CPU Intel Premium)</div>
+              <div style={{ fontSize: 12, color: 'var(--c-ink2)', marginTop: 4 }}>
+                Suporta até <strong>100 robôs em segundo plano</strong> ou <strong>15 telas ao vivo simultâneas</strong>. (Seu ambiente real atual).
               </div>
             </div>
 
@@ -2010,6 +2112,15 @@ function Infra() {
         {/* Simulador SaaS */}
         <Card style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <h3 style={{ color: 'var(--c-ink)', fontSize: 16, fontWeight: 700, margin: 0 }}>💸 Calculadora de Lucro e Custos SaaS</h3>
+          
+          {metrics?.saas && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, background: 'var(--c-soft)', color: 'var(--c-softfg)', padding: '10px 14px', borderRadius: 8, fontSize: 12.5, fontWeight: 700, alignItems: 'center' }}>
+              <span>Métricas reais atuais:</span>
+              <span style={{ background: 'var(--c-surface)', padding: '2px 8px', borderRadius: 4, fontSize: 11.5 }}>{metrics.saas.totalTerminais} terminais ativos</span>
+              <span style={{ background: 'var(--c-surface)', padding: '2px 8px', borderRadius: 4, fontSize: 11.5 }}>Faturamento: {brl(metrics.saas.totalFaturamento)}/mês</span>
+              <span style={{ background: 'var(--c-surface)', padding: '2px 8px', borderRadius: 4, fontSize: 11.5 }}>Preço médio: {brl(metrics.saas.precoMedio)}</span>
+            </div>
+          )}
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div>

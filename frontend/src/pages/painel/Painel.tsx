@@ -482,6 +482,57 @@ function AreaChart({ points, labels }: { points: number[]; labels: string[] }) {
   );
 }
 
+/* ============ MAPEAMENTO DE COLUNAS ============ */
+const CAMPOS_MAP: { key: string; label: string }[] = [
+  { key: 'cns', label: 'CNS / CPF do paciente' },
+  { key: 'data_atendimento', label: 'Data de atendimento' },
+  { key: 'profissional', label: 'Médico / Profissional' },
+  { key: 'nome', label: 'Nome do paciente' },
+  { key: 'data_nascimento', label: 'Data de nascimento' },
+];
+
+function MapeamentoModal({ colunas, obrigatorios, mapa, setMapa, busy, onCancel, onConfirm }: { colunas: string[]; obrigatorios: string[]; mapa: Record<string, string>; setMapa: (m: Record<string, string>) => void; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  const set = (campo: string, col: string) => setMapa({ ...mapa, [campo]: col });
+  return (
+    <div onClick={onCancel} style={{ position: 'fixed', inset: 0, zIndex: 95, background: 'rgba(7,11,22,.62)', backdropFilter: 'blur(3px)', display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} className="ia-card" style={{ width: 560, maxWidth: '100%', padding: 26, maxHeight: '88vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 11, background: 'var(--c-soft)', color: 'var(--c-softfg)', display: 'grid', placeItems: 'center' }}><FileSpreadsheet size={22} /></div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h3 style={{ color: 'var(--c-ink)', fontSize: 19, fontWeight: 700, margin: 0 }}>Mapear colunas da planilha</h3>
+            <div style={{ color: 'var(--c-ink3)', fontSize: 12.5 }}>Confira qual coluna corresponde a cada campo. Campos com <span style={{ color: 'var(--c-err)' }}>*</span> são obrigatórios.</div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {CAMPOS_MAP.map((c) => {
+            const obrig = obrigatorios.includes(c.key);
+            const vazioObrig = obrig && !mapa[c.key];
+            return (
+              <div key={c.key}>
+                <label className="ia-label">{c.label} {obrig && <span style={{ color: 'var(--c-err)' }}>*</span>}</label>
+                <select value={mapa[c.key] ?? ''} onChange={(e) => set(c.key, e.target.value)} className={`ia-input ${vazioObrig ? 'err' : ''}`} style={{ width: '100%' }}>
+                  <option value="">{obrig ? '— Selecione a coluna —' : '— Não mapear —'}</option>
+                  {colunas.map((col) => <option key={col} value={col}>{col}</option>)}
+                </select>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 14, background: 'var(--c-surface2)', border: '1px solid var(--c-border)', borderRadius: 8, padding: '10px 12px' }}>
+          Detectamos {colunas.length} coluna(s) no arquivo e já sugerimos o mapeamento automático. Ajuste se algo estiver errado — nada é importado com campo trocado.
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+          <button onClick={onCancel} disabled={busy} className="ia-btn-outline" style={{ flex: 1 }}>Cancelar</button>
+          <button onClick={onConfirm} disabled={busy} className="ia-btn" style={{ flex: 1, padding: 12 }}>{busy ? 'Importando…' : 'Confirmar e importar'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ============ ENVIAR FICHA ============ */
 function Enviar({ empresas, uploads, contas = [], isMember, onChange, showToast }: { empresas: any[]; uploads: Upload[]; contas?: ClinicAccount[]; isMember: boolean; onChange: () => Promise<void>; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void }) {
   const [empresaId, setEmpresaId] = useState<number | ''>('');
@@ -490,24 +541,39 @@ function Enviar({ empresas, uploads, contas = [], isMember, onChange, showToast 
   const [fileKey, setFileKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [selectTerminalForUpload, setSelectTerminalForUpload] = useState<Upload | null>(null);
+  // Mapeamento de colunas (previne planilhas com cabeçalhos errados).
+  const [mapPreview, setMapPreview] = useState<{ colunas: string[]; obrigatorios: string[] } | null>(null);
+  const [mapa, setMapa] = useState<Record<string, string>>({});
 
-  const importar = async () => {
+  // 1º passo: lê os cabeçalhos do arquivo e abre a tela de mapeamento.
+  const abrirMapeamento = async () => {
     if (!empresaId || !file) return showToast({ title: 'Faltam dados', msg: 'Escolha a empresa e o arquivo.', kind: 'err' });
+    setBusy(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const r = await apiUpload<{ colunas: string[]; sugestao: Record<string, string>; obrigatorios: string[] }>('/uploads/colunas', form);
+      setMapa(r.sugestao ?? {});
+      setMapPreview({ colunas: r.colunas, obrigatorios: r.obrigatorios });
+    } catch (e) { showToast({ title: 'Falha ao ler o arquivo', msg: (e as Error).message, kind: 'err' }); } finally { setBusy(false); }
+  };
+
+  // 2º passo: confirma o mapa e envia o arquivo com mapeamento_campos.
+  const confirmarImport = async () => {
+    const faltando = (mapPreview?.obrigatorios ?? []).filter((c) => !mapa[c]);
+    if (faltando.length) return showToast({ title: 'Mapeamento incompleto', msg: 'Vincule todos os campos obrigatórios (marcados com *).', kind: 'err' });
     setBusy(true);
     try {
       const form = new FormData();
       form.append('empresa_id', String(empresaId));
       form.append('name', nomeLista.trim());
-      form.append('file', file);
+      form.append('file', file!);
+      form.append('mapeamento_campos', JSON.stringify(mapa));
       const upload = await apiUpload<Upload>('/uploads', form);
-      setFile(null); setFileKey((k) => k + 1); setNomeLista('');
+      setMapPreview(null); setMapa({}); setFile(null); setFileKey((k) => k + 1); setNomeLista('');
       await onChange();
-      
-      if (isMember) {
-        setSelectTerminalForUpload(upload);
-      } else {
-        showToast({ title: 'Enviado para a IA', msg: 'As fichas entraram na fila de extração.', kind: 'ok' });
-      }
+      if (isMember) setSelectTerminalForUpload(upload);
+      else showToast({ title: 'Enviado para a IA', msg: 'As fichas entraram na fila de extração.', kind: 'ok' });
     } catch (e) { showToast({ title: 'Falha no envio', msg: (e as Error).message, kind: 'err' }); } finally { setBusy(false); }
   };
 
@@ -526,7 +592,7 @@ function Enviar({ empresas, uploads, contas = [], isMember, onChange, showToast 
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <Card style={{ padding: 24 }}>
         <div style={{ color: 'var(--c-ink)', fontSize: 16, fontWeight: 700 }}>Importar planilha (CSV / Excel / XML)</div>
-        <div style={{ color: 'var(--c-ink3)', fontSize: 13, marginTop: 4 }}>Envie uma planilha com os dados dos pacientes. As colunas são mapeadas automaticamente.</div>
+        <div style={{ color: 'var(--c-ink3)', fontSize: 13, marginTop: 4 }}>Envie a planilha e <b>confira o mapeamento das colunas</b> antes de importar — evita erro por cabeçalho fora do padrão.</div>
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 18 }}>
           <div style={{ flex: 1, minWidth: 200 }}>
             <label className="ia-label">Nome da lista</label>
@@ -543,9 +609,21 @@ function Enviar({ empresas, uploads, contas = [], isMember, onChange, showToast 
             <label className="ia-label">Arquivo (CSV, Excel ou XML)</label>
             <input key={fileKey} type="file" accept=".csv,.xlsx,.xml" onChange={(e) => setFile(e.target.files?.[0] ?? null)} style={{ display: 'block', color: 'var(--c-ink2)', fontSize: 13, border: '1px solid var(--c-border)', borderRadius: 8, padding: '7px 10px', background: 'var(--c-surface2)' }} />
           </div>
-          <button onClick={importar} disabled={busy} className="ia-btn" style={{ height: 42, padding: '0 22px', fontSize: 14 }}><FileSpreadsheet size={16} /> {busy ? 'Importando…' : 'Importar'}</button>
+          <button onClick={abrirMapeamento} disabled={busy} className="ia-btn" style={{ height: 42, padding: '0 22px', fontSize: 14 }}><FileSpreadsheet size={16} /> {busy ? 'Lendo…' : 'Mapear e importar'}</button>
         </div>
       </Card>
+
+      {mapPreview && (
+        <MapeamentoModal
+          colunas={mapPreview.colunas}
+          obrigatorios={mapPreview.obrigatorios}
+          mapa={mapa}
+          setMapa={setMapa}
+          busy={busy}
+          onCancel={() => setMapPreview(null)}
+          onConfirm={confirmarImport}
+        />
+      )}
       <EnviosRecentes empresas={empresas} uploads={uploads} contas={contas} onChange={onChange} showToast={showToast} />
 
       {selectTerminalForUpload && (() => {
