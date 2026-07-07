@@ -818,15 +818,19 @@ export class WebAutomator {
     // O CID-10 é definido pela idade do paciente (controles: OCI 0–8 vs 9+),
     // não pela coluna de CID da ficha — por isso não bloqueia aqui.
     const dataAtendimentoStr = fmtDate(patient.dataAtendimento);
+    const T = (m: string) => console.log(`[TRACE cad ${cns}] ${m} | url=${page.url().slice(0, 60)}`);
     this.passo(`Iniciando cadastro de ${nome || 'paciente'} (CNS ${cns})...`);
 
     // Limpa alerta "alterar o procedimento" que possa ter vazado do paciente
     // anterior (fica aberto bloqueando o formulário deste).
     await this.confirmarAlterarProcedimento();
+    T('vai clicar "Incluir contato assistencial"');
     // A página tem cópia duplicada do botão (layout mobile/desktop) — .first().
     await page.getByRole('button', { name: 'Incluir contato assistencial' }).first().click();
+    T('clicou Incluir → vai marcar radio documentação "Sim"');
     // Confirma que o indivíduo possui documentação.
     await page.getByRole('radio', { name: 'Sim', exact: true }).first().click();
+    T('radio Sim ok → busca CNS');
 
     this.passo(`Buscando paciente pelo CNS ${cns}...`);
     const cnsField = page.locator('ion-input[formcontrolname="cpfCns"] input');
@@ -848,17 +852,23 @@ export class WebAutomator {
       break;
     }
 
+    T('CNS buscado → lê data nasc CADSUS');
     // Usa a data de nascimento do CADSUS (mais confiável que a da ficha).
     const dataNascCadsus = await this.lerDataNascimentoAutoPreenchida();
     if (dataNascCadsus) patient.dataNascimento = dataNascCadsus;
 
+    T('vai clicar Próximo (após CNS)');
     await page.getByRole('button', { name: 'Próximo' }).click();
+    T('Próximo clicado → vai clicar Sim (confirmação CNS)');
     await page.getByRole('button', { name: 'Sim' }).last().click({ timeout: 10_000 });
+    T('Sim clicado → aguarda form admissão');
     await page.waitForTimeout(2000);
 
     this.passo('Preenchendo dados de admissão...');
     const dataAdmissaoStr = this.valorOverride(overrides, 'data_admissao') || dataAtendimentoStr;
+    T('vai PREENCHER dataAdmissao');
     await page.locator('ion-input[formcontrolname="dataAdmissao"] input').fill(dataAdmissaoStr);
+    T('dataAdmissao PREENCHIDA ok');
     await page.waitForTimeout(2000);
     await this.aguardarModalCarregamento(1500);
 
