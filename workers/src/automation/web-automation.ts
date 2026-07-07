@@ -493,6 +493,22 @@ export class WebAutomator {
     await this.login();
   }
 
+  /** DEBUG: salva screenshot + HTML da tela atual (para diagnosticar qual campo
+   * do formulário está travando). Ligado só com DEBUG_CADASTRO=1 no ambiente. */
+  async capturarDebug(tag: string): Promise<void> {
+    if (process.env.DEBUG_CADASTRO !== '1') return;
+    const page = this.page;
+    if (!page) return;
+    try {
+      const dir = process.env.DEBUG_CADASTRO_DIR || '/tmp';
+      const safe = tag.replace(/[^\w]/g, '_').slice(0, 30);
+      await page.screenshot({ path: `${dir}/cadastro_${safe}.png`, fullPage: true }).catch(() => {});
+      const html = await page.content().catch(() => '');
+      await import('node:fs/promises').then((fs) => fs.writeFile(`${dir}/cadastro_${safe}.html`, html, 'utf8')).catch(() => {});
+      console.log(`[DEBUG cadastro] ${tag} | url=${page.url()} | salvo em ${dir}/cadastro_${safe}.{png,html}`);
+    } catch { /* melhor esforço */ }
+  }
+
   // ---- Helpers do formulário (porta fiel de web_automation.py) -------------
 
   private valorOverride(overrides: Record<string, string> | undefined, campo: string): string | null {

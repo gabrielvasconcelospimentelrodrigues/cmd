@@ -296,6 +296,8 @@ async function cadastrarComRetry(automator: WebAutomator, pd: PatientData, uploa
     await automator.incluirContato(pd);
     return { ok: true };
   } catch (e) {
+    // DEBUG: fotografa a tela no 1º erro para vermos qual campo travou.
+    await automator.capturarDebug(quem).catch(() => {});
     if (e instanceof ProfessionalNotFoundError) {
       await automator.recuperarParaContatos();
       return { ok: false, erro: (e as Error).message };
