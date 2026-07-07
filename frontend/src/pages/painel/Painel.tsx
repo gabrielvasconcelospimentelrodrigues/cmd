@@ -120,7 +120,8 @@ export default function Painel() {
   const pendCount = patientsView.filter((p) => p.status === 'error' || p.status === 'needs_review').length;
   // Reflete o filtro do header: sidebar "Em execução" e status "IA ativa" mostram
   // o terminal selecionado (ou todos, se sem filtro) — ao vivo como se estivesse na conta.
-  const runningUploads = uploadsView.filter((u) => ['registering', 'extracting'].includes(u.status));
+  // Inclui 'extracted' para o ao vivo ficar CONTÍNUO da extração até o cadastro (já adianta).
+  const runningUploads = uploadsView.filter((u) => ['registering', 'extracting', 'extracted'].includes(u.status));
   // Mostra o ao vivo SEMPRE que houver automação rodando (o filtro só narrow-a a lista).
   const showRealTime = runningUploads.length > 0;
   const running = showRealTime;
@@ -265,7 +266,7 @@ function Home({ tenant, uploads, patients, empresas = [], contas = [], filtroMem
   // Estatísticas REAIS (agregado no banco, sem o teto de 500 da lista /patients).
   const [stats, setStats] = useState<StatsResp | null>(null);
 
-  const runningUploads = uploads.filter((u) => ['registering', 'extracting'].includes(u.status));
+  const runningUploads = uploads.filter((u) => ['registering', 'extracting', 'extracted'].includes(u.status));
   const custo = Number(tenant?.custo_mensal_funcionario ?? 3000) || 3000;
   const ok = patients.filter((p) => OK.includes(p.status));
   const reg = stats ? stats.registrados : ok.length;
