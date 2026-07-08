@@ -905,6 +905,17 @@ const CAMPOS_FICHA: { k: keyof FichaEdit; label: string; type?: string }[] = [
   { k: 'medico_nome', label: 'Médico' },
 ];
 
+/** Rótulo/cor da modalidade: Catarata (Cirurgia) vs OCI. */
+function modInfo(m?: string | null): { label: string; color: string; bg: string } {
+  return m === 'catarata'
+    ? { label: 'Cirurgia', color: '#7c3aed', bg: 'rgba(124,58,237,.14)' }
+    : { label: 'OCI', color: '#0891b2', bg: 'rgba(8,145,178,.14)' };
+}
+function ModBadge({ m }: { m?: string | null }) {
+  const i = modInfo(m);
+  return <span title={m === 'catarata' ? 'Cirurgia de Catarata (FACO)' : 'OCI (pacote por idade)'} style={{ fontSize: 10.5, fontWeight: 800, color: i.color, background: i.bg, padding: '3px 9px', borderRadius: 999, flex: 'none', whiteSpace: 'nowrap', letterSpacing: '.02em' }}>{i.label}</span>;
+}
+
 function FichasModal({ upload, onClose, onChange, showToast }: { upload: Upload; onClose: () => void; onChange: () => Promise<void>; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void }) {
   const [fichas, setFichas] = useState<FichaEdit[]>([]);
   const [loading, setLoading] = useState(true);
@@ -930,7 +941,7 @@ function FichasModal({ upload, onClose, onChange, showToast }: { upload: Upload;
 
   const abrirEdicao = (f: FichaEdit) => {
     setEditId(f.id);
-    setForm({ nome: f.nome, cns: f.cns, data_atendimento: f.data_atendimento, data_nascimento: f.data_nascimento ?? null, cid10_codigo: f.cid10_codigo, medico_nome: f.medico_nome });
+    setForm({ nome: f.nome, cns: f.cns, data_atendimento: f.data_atendimento, data_nascimento: f.data_nascimento ?? null, cid10_codigo: f.cid10_codigo, medico_nome: f.medico_nome, modalidade: f.modalidade ?? 'oci' });
   };
   const salvarUma = async () => {
     if (editId == null) return;
@@ -1014,6 +1025,7 @@ function FichasModal({ upload, onClose, onChange, showToast }: { upload: Upload;
                     <Meta label="Médico" v={f.medico_nome} />
                   </div>
                 </div>
+                <ModBadge m={f.modalidade} />
                 <span style={{ fontSize: 11, fontWeight: 700, color: tc, background: tbg, padding: '4px 10px', borderRadius: 999, flex: 'none', whiteSpace: 'nowrap' }}>{toneLabel(t)}</span>
                 <button onClick={() => (aberto ? setEditId(null) : abrirEdicao(f))} className="ia-btn-outline" style={{ height: 34, padding: '0 14px', fontSize: 13, flex: 'none' }}>{aberto ? 'Fechar' : 'Editar'}</button>
               </div>
@@ -1027,6 +1039,13 @@ function FichasModal({ upload, onClose, onChange, showToast }: { upload: Upload;
                         <input type={c.type ?? 'text'} value={(form[c.k] as string) ?? ''} onChange={(e) => setForm({ ...form, [c.k]: e.target.value })} style={inp} />
                       </div>
                     ))}
+                    <div>
+                      <label style={{ color: 'var(--c-ink3)', fontSize: 11, display: 'block', marginBottom: 4 }}>Modalidade</label>
+                      <select value={(form.modalidade as string) ?? 'oci'} onChange={(e) => setForm({ ...form, modalidade: e.target.value as 'oci' | 'catarata' })} style={inp}>
+                        <option value="oci">OCI (pacote por idade)</option>
+                        <option value="catarata">Cirurgia — Catarata (FACO)</option>
+                      </select>
+                    </div>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
                     <button onClick={() => setEditId(null)} className="ia-btn-outline" style={{ padding: '8px 14px', fontSize: 13 }}>Cancelar</button>

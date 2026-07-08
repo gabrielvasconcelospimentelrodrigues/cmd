@@ -328,7 +328,7 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
 
     const { data } = await (supabaseAdmin as any)
       .from('patient_records')
-      .select('id, upload_id, nome, cns, data_atendimento, clinic_account_id, cid10_codigo, medico_nome, status, error_message, created_at, clinic_accounts(tenant_id), uploads!inner(deleted_at, clinic_account_id, empresa_id, uploaded_by)')
+      .select('id, upload_id, nome, cns, data_atendimento, clinic_account_id, cid10_codigo, medico_nome, modalidade, status, error_message, created_at, clinic_accounts(tenant_id), uploads!inner(deleted_at, clinic_account_id, empresa_id, uploaded_by)')
       .is('uploads.deleted_at', null)
       .order('id', { ascending: false })
       .limit(500);
@@ -428,6 +428,8 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     for (const k of ['nome', 'cns', 'data_atendimento', 'cid10_codigo', 'medico_nome', 'data_nascimento']) {
       if (b[k] !== undefined) out[k] = b[k] === '' ? null : b[k];
     }
+    // Modalidade: só aceita 'oci' ou 'catarata' (default 'oci' se vier vazio/errado).
+    if (b.modalidade !== undefined) out.modalidade = b.modalidade === 'catarata' ? 'catarata' : 'oci';
     return out;
   };
 

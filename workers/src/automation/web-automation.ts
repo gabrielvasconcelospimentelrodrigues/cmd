@@ -836,8 +836,9 @@ export class WebAutomator {
     // O CID-10 é definido pela idade do paciente (controles: OCI 0–8 vs 9+),
     // não pela coluna de CID da ficha — por isso não bloqueia aqui.
     const dataAtendimentoStr = fmtDate(patient.dataAtendimento);
+    const modLabel = patient.modalidade === 'catarata' ? 'CIRURGIA (Catarata)' : 'OCI';
     const T = (m: string) => console.log(`[TRACE cad ${cns}] ${m} | url=${page.url().slice(0, 60)}`);
-    this.passo(`Iniciando cadastro de ${nome || 'paciente'} (CNS ${cns})...`);
+    this.passo(`Iniciando cadastro [${modLabel}] de ${nome || 'paciente'} (CNS ${cns})...`);
 
     // Limpa alerta "alterar o procedimento" que possa ter vazado do paciente
     // anterior (fica aberto bloqueando o formulário deste).

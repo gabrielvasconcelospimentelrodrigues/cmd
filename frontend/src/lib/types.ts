@@ -179,6 +179,8 @@ export interface Ficha {
   data_atendimento: string | null;
   cid10_codigo: string;
   medico_nome: string;
+  /** 'oci' (padrão) ou 'catarata' (Cirurgia/FACO). */
+  modalidade?: 'oci' | 'catarata' | null;
   status: string;
   error_message: string;
   created_at: string;

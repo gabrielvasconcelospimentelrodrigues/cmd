@@ -60,7 +60,10 @@ export default function Pendencias({ patients, uploads = [], onChange, showToast
         ) : pend.map((p) => (
           <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '40px 1.6fr 1fr 110px 150px 1.4fr 100px', alignItems: 'center', padding: '12px 18px', borderBottom: '1px solid var(--c-border)' }}>
             <input type="checkbox" checked={sel.has(p.id)} onChange={() => toggle(p.id)} style={{ width: 16, height: 16, accentColor: 'var(--c-blued)' }} />
-            <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 500 }}>{p.nome || '—'}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nome || '—'}</span>
+              <span title={p.modalidade === 'catarata' ? 'Cirurgia de Catarata (FACO)' : 'OCI'} style={{ flex: 'none', fontSize: 10, fontWeight: 800, color: p.modalidade === 'catarata' ? '#7c3aed' : '#0891b2', background: p.modalidade === 'catarata' ? 'rgba(124,58,237,.14)' : 'rgba(8,145,178,.14)', padding: '2px 7px', borderRadius: 999 }}>{p.modalidade === 'catarata' ? 'Cirurgia' : 'OCI'}</span>
+            </span>
             <span className="ia-mono" style={{ color: 'var(--c-ink2)', fontSize: 12 }}>{p.cns || '—'}</span>
             <span style={{ color: 'var(--c-ink2)', fontSize: 13 }}>{p.data_atendimento ?? '—'}</span>
             <span style={{ color: 'var(--c-ink2)', fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={nomeDaLista(p.upload_id)}>{nomeDaLista(p.upload_id)}</span>
