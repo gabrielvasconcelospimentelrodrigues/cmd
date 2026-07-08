@@ -47,6 +47,15 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
     const nome = (data.user.user_metadata as { full_name?: string } | null)?.full_name;
     req.authUser = { id: data.user.id, email: data.user.email, nome };
     req.authRole = (data.user.app_metadata as { role?: string } | null)?.role ?? null;
+
+    // Registrar batimento cardíaco (heartbeat) online no Redis
+    try {
+      const { getRedis } = await import('../lib/redis');
+      const redis = getRedis();
+      await redis.set(`user:active:${data.user.id}`, '1', 'EX', 300); // Expira em 5 minutos (300 segundos)
+    } catch (e) {
+      req.log.error(e, 'Erro ao registrar heartbeat do usuário no Redis');
+    }
   }
 
   // Verifica o token E exige papel de super admin.

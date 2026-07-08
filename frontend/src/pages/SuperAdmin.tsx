@@ -206,7 +206,7 @@ const UF_NOME: Record<string, string> = {
   AC: 'Acre', AL: 'Alagoas', AP: 'Amapá', AM: 'Amazonas', BA: 'Bahia', CE: 'Ceará', DF: 'Distrito Federal', ES: 'Espírito Santo', GO: 'Goiás', MA: 'Maranhão', MT: 'Mato Grosso', MS: 'Mato Grosso do Sul', MG: 'Minas Gerais', PA: 'Pará', PB: 'Paraíba', PR: 'Paraná', PE: 'Pernambuco', PI: 'Piauí', RJ: 'Rio de Janeiro', RN: 'Rio Grande do Norte', RS: 'Rio Grande do Sul', RO: 'Rondônia', RR: 'Roraima', SC: 'Santa Catarina', SP: 'São Paulo', SE: 'Sergipe', TO: 'Tocantins',
 };
 
-interface MapaEstado { ativos: number; inativos: number; total: number; assinantes: { name: string; cidade: string | null; ativo: boolean; membros: string[]; empresas?: string[] }[] }
+interface MapaEstado { ativos: number; inativos: number; total: number; assinantes: { name: string; cidade: string | null; ativo: boolean; membros: { nome: string; online: boolean }[]; empresas?: string[]; realizandoAutomacao?: boolean }[] }
 interface MapaResp { estados: Record<string, MapaEstado>; resumo: { total: number; ativos: number; inativos: number; sem_uf: number; estados_com_uso: number } }
 
 function BrazilMap({ estados, maxAtivos, onHover, hover }: { estados: Record<string, MapaEstado>; maxAtivos: number; onHover: (uf: string | null) => void; hover: string | null }) {
@@ -337,9 +337,40 @@ function MapaBrasilSection({ onGo }: { onGo: (p: Page) => void }) {
               </div>
               {eHover.assinantes.slice(0, 6).map((a, i) => (
                 <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '6px 0', borderBottom: i < eHover.assinantes.slice(0, 6).length - 1 ? '1px dashed var(--c-border)' : 'none' }}>
+                  <style>{`
+                    @keyframes ia-pulse-glowing {
+                      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6); opacity: 0.8; }
+                      50% { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0); opacity: 1; }
+                      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); opacity: 0.8; }
+                    }
+                  `}</style>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: a.ativo ? 'var(--c-ok)' : 'var(--c-warn)', flex: 'none' }} />
-                    <span style={{ color: 'var(--c-ink2)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}{a.cidade ? ` · ${a.cidade}` : ''}</span>
+                    <span style={{ color: 'var(--c-ink)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}{a.cidade ? ` · ${a.cidade}` : ''}</span>
+                    {a.realizandoAutomacao && (
+                      <span style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        background: 'var(--c-oksoft)',
+                        color: 'var(--c-okfg)',
+                        padding: '2px 7px',
+                        borderRadius: 999,
+                        marginLeft: 'auto',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        flex: 'none'
+                      }}>
+                        <span style={{ 
+                          width: 5, 
+                          height: 5, 
+                          borderRadius: '50%', 
+                          background: 'var(--c-ok)', 
+                          animation: 'ia-pulse-glowing 1.4s infinite' 
+                        }} />
+                        rodando
+                      </span>
+                    )}
                   </div>
                   {a.empresas && a.empresas.length > 0 && (
                     <div style={{ color: 'var(--c-ink3)', fontSize: 11.5, paddingLeft: 14, fontWeight: 500 }}>
@@ -347,8 +378,26 @@ function MapaBrasilSection({ onGo }: { onGo: (p: Page) => void }) {
                     </div>
                   )}
                   {a.membros && a.membros.length > 0 && (
-                    <div style={{ color: 'var(--c-ink3)', fontSize: 11, paddingLeft: 14 }}>
-                      Membros: {a.membros.join(', ')}
+                    <div style={{ fontSize: 11, paddingLeft: 14, display: 'flex', flexWrap: 'wrap', gap: '4px 8px', marginTop: 3 }}>
+                      {a.membros.map((m, idx) => (
+                        <span key={idx} style={{ 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          gap: 4, 
+                          color: m.online ? 'var(--c-okfg)' : 'var(--c-ink3)', 
+                          fontWeight: m.online ? 700 : 400 
+                        }}>
+                          <span style={{ 
+                            width: 5, 
+                            height: 5, 
+                            borderRadius: '50%', 
+                            background: m.online ? 'var(--c-ok)' : '#7C808C',
+                            boxShadow: m.online ? '0 0 3px var(--c-ok)' : 'none',
+                            flex: 'none'
+                          }} />
+                          {m.nome}
+                        </span>
+                      ))}
                     </div>
                   )}
                 </div>

@@ -248,10 +248,34 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
   // MAPA do Brasil: distribuição de assinantes por UF (ativos/inativos).
   app.get('/admin/mapa', { preHandler: app.authenticateSuperAdmin }, async () => {
+    // 1. Obter usuários online no Redis (heartbeats ativos)
+    let onlineUserIds = new Set<string>();
+    try {
+      const { getRedis } = await import('../lib/redis');
+      const redis = getRedis();
+      const activeKeys = await redis.keys('user:active:*');
+      onlineUserIds = new Set(activeKeys.map((k) => k.split(':').pop() || ''));
+    } catch (e) {
+      /* ignore */
+    }
+
+    // 2. Obter clínicas realizando automação de fichas ativa
+    let activeTenantIds = new Set<number>();
+    try {
+      const { data: activeUploads } = await supabaseAdmin
+        .from('uploads')
+        .select('tenant_id')
+        .in('status', ['registering', 'extracting']);
+      activeTenantIds = new Set((activeUploads ?? []).map((u: any) => Number(u.tenant_id)));
+    } catch (e) {
+      /* ignore */
+    }
+
+    // 3. Buscar dados de clínicas, empresas e membros
     const [{ data: tenants }, { data: empresas }, { data: members }] = await Promise.all([
-      (supabaseAdmin as any).from('tenants').select('id, name, uf, cidade, status'),
+      (supabaseAdmin as any).from('tenants').select('id, name, uf, cidade, status, owner_user_id, responsavel'),
       supabaseAdmin.from('empresas').select('id, nome, tenant_id'),
-      supabaseAdmin.from('tenant_members').select('id, nome, email, tenant_id'),
+      (supabaseAdmin as any).from('tenant_members').select('id, nome, email, tenant_id, user_id'),
     ]);
 
     const empsByTenant = new Map();
@@ -263,11 +287,28 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const membersByTenant = new Map();
     for (const m of (members ?? [])) {
       if (!membersByTenant.has(m.tenant_id)) membersByTenant.set(m.tenant_id, []);
-      membersByTenant.get(m.tenant_id).push(m.nome || m.email.split('@')[0]);
+      const online = onlineUserIds.has(m.user_id);
+      membersByTenant.get(m.tenant_id).push({
+        nome: m.nome || m.email.split('@')[0],
+        online
+      });
     }
 
-    const rows = (tenants ?? []) as { id: number; name: string; uf: string | null; cidade: string | null; status: string }[];
-    const estados: Record<string, { ativos: number; inativos: number; total: number; assinantes: { name: string; cidade: string | null; ativo: boolean; membros: string[]; empresas: string[] }[] }> = {};
+    const rows = (tenants ?? []) as { id: number; name: string; uf: string | null; cidade: string | null; status: string; owner_user_id: string; responsavel: string | null }[];
+    const estados: Record<string, {
+      ativos: number;
+      inativos: number;
+      total: number;
+      assinantes: {
+        name: string;
+        cidade: string | null;
+        ativo: boolean;
+        membros: { nome: string; online: boolean }[];
+        empresas: string[];
+        realizandoAutomacao: boolean;
+      }[];
+    }> = {};
+
     let semUf = 0, totalAtivos = 0, totalInativos = 0;
     for (const r of rows) {
       const ativo = r.status === 'active';
@@ -278,9 +319,34 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       estados[uf].total++;
       if (ativo) estados[uf].ativos++; else estados[uf].inativos++;
       
-      const tenantMembers = membersByTenant.get(r.id) ?? [];
+      const tenantMembers = [...(membersByTenant.get(r.id) ?? [])];
+      
+      // Dono (responsável principal)
+      const ownerOnline = onlineUserIds.has(r.owner_user_id);
+      const hasOwner = (members ?? []).some((m: any) => m.user_id === r.owner_user_id && m.tenant_id === r.id);
+      if (!hasOwner && r.responsavel) {
+        tenantMembers.unshift({
+          nome: `${r.responsavel} (Dono)`,
+          online: ownerOnline
+        });
+      } else if (hasOwner) {
+        const idx = tenantMembers.findIndex((m: any) => (members ?? []).some((dbM: any) => dbM.user_id === r.owner_user_id && (dbM.nome === m.nome || dbM.email.split('@')[0] === m.nome)));
+        if (idx !== -1) {
+          tenantMembers[idx].nome = `${tenantMembers[idx].nome} (Dono)`;
+        }
+      }
+
       const tenantEmps = empsByTenant.get(r.id) ?? [];
-      estados[uf].assinantes.push({ name: r.name, cidade: r.cidade, ativo, membros: tenantMembers, empresas: tenantEmps });
+      const realizandoAutomacao = activeTenantIds.has(r.id);
+
+      estados[uf].assinantes.push({
+        name: r.name,
+        cidade: r.cidade,
+        ativo,
+        membros: tenantMembers,
+        empresas: tenantEmps,
+        realizandoAutomacao
+      });
     }
     return {
       estados,
