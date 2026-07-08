@@ -10,8 +10,10 @@ import ExcelJS from 'exceljs';
 /** Campos de destino do import mapeado (os que o worker/importarComMapa espera). */
 export const CAMPOS_IMPORTACAO = ['cns', 'data_atendimento', 'profissional', 'nome', 'data_nascimento', 'modalidade'] as const;
 export type CampoImportacao = (typeof CAMPOS_IMPORTACAO)[number];
-/** Obrigatórios para o cadastro (sem eles cai em Pendências). */
-export const CAMPOS_OBRIGATORIOS: CampoImportacao[] = ['cns', 'data_atendimento', 'profissional'];
+/** Obrigatórios NO MAPEAMENTO (o usuário precisa vincular a coluna para prosseguir).
+ * modalidade é obrigatório para o operador definir explicitamente Cirurgia x OCI
+ * (não deixamos assumir sozinho). */
+export const CAMPOS_OBRIGATORIOS: CampoImportacao[] = ['cns', 'data_atendimento', 'profissional', 'modalidade'];
 
 const ALIASES: Record<CampoImportacao, string[]> = {
   modalidade: ['modalidade', 'tipo', 'tipo de cadastro', 'tipo cadastro', 'cirurgia', 'catarata', 'oci', 'tipo procedimento', 'tipo de procedimento', 'modalidade cadastro'],

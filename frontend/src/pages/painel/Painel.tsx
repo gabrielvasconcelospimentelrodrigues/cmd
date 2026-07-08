@@ -492,9 +492,9 @@ const CAMPOS_MAP: { key: string; label: string }[] = [
   { key: 'cns', label: 'CNS / CPF do paciente' },
   { key: 'data_atendimento', label: 'Data de atendimento' },
   { key: 'profissional', label: 'Médico / Profissional' },
+  { key: 'modalidade', label: 'Modalidade (Cirurgia/OCI)' },
   { key: 'nome', label: 'Nome do paciente' },
   { key: 'data_nascimento', label: 'Data de nascimento' },
-  { key: 'modalidade', label: 'Modalidade (Catarata/OCI)' },
 ];
 
 function MapeamentoModal({ colunas, obrigatorios, mapa, setMapa, busy, onCancel, onConfirm }: { colunas: string[]; obrigatorios: string[]; mapa: Record<string, string>; setMapa: (m: Record<string, string>) => void; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
@@ -526,7 +526,10 @@ function MapeamentoModal({ colunas, obrigatorios, mapa, setMapa, busy, onCancel,
           })}
         </div>
 
-        <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 14, background: 'var(--c-surface2)', border: '1px solid var(--c-border)', borderRadius: 8, padding: '10px 12px' }}>
+        <div style={{ color: '#92400e', fontSize: 12.5, marginTop: 14, background: 'rgba(245,158,11,.12)', border: '1px solid rgba(245,158,11,.4)', borderRadius: 8, padding: '10px 12px', lineHeight: 1.5 }}>
+          <b>⚠️ Modalidade é obrigatória.</b> Selecione a coluna da planilha que indica se cada paciente é <b>Cirurgia (Catarata)</b> ou <b>OCI</b>. É o que separa as duas automações — sem isso a importação <b>não é liberada</b>. (Valores com "catarata"/"faco" viram Cirurgia; qualquer outro vira OCI.)
+        </div>
+        <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 10, background: 'var(--c-surface2)', border: '1px solid var(--c-border)', borderRadius: 8, padding: '10px 12px' }}>
           Detectamos {colunas.length} coluna(s) no arquivo e já sugerimos o mapeamento automático. Ajuste se algo estiver errado — nada é importado com campo trocado.
         </div>
 
@@ -567,7 +570,11 @@ function Enviar({ empresas, uploads, contas = [], isMember, onChange, showToast 
   // 2º passo: confirma o mapa e envia o arquivo com mapeamento_campos.
   const confirmarImport = async () => {
     const faltando = (mapPreview?.obrigatorios ?? []).filter((c) => !mapa[c]);
-    if (faltando.length) return showToast({ title: 'Mapeamento incompleto', msg: 'Vincule todos os campos obrigatórios (marcados com *).', kind: 'err' });
+    if (faltando.length) {
+      const nomes = faltando.map((c) => CAMPOS_MAP.find((m) => m.key === c)?.label ?? c).join(', ');
+      const temMod = faltando.includes('modalidade');
+      return showToast({ title: 'Mapeamento incompleto', msg: `Vincule os campos obrigatórios: ${nomes}.${temMod ? ' A Modalidade (Cirurgia/OCI) é obrigatória para separar as automações.' : ''}`, kind: 'err' });
+    }
     setBusy(true);
     try {
       const form = new FormData();
