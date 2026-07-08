@@ -383,10 +383,20 @@ export class WebAutomator {
       await this.selecionarPerfilMinisterio(this.page!).catch(() => {});
 
       // Portal "Meus Sistemas" → "ACESSAR" abre o CMD-COLETA em nova aba.
+      // A conta pode ter VÁRIOS sistemas (ex.: SISCAN + CMD-COLETA). Clica o
+      // ACESSAR do CARD do CMD-COLETA — clicar o 1º ACESSAR abriria o sistema
+      // errado (SISCAN) e o login nunca chegava no CMD.
+      let acessar = page
+        .locator('xpath=//*[contains(text(),"CMD-COLETA")]/ancestor::*[.//*[contains(normalize-space(.),"ACESSAR")]][1]')
+        .getByText('ACESSAR', { exact: true }).first();
+      if (!(await acessar.count().catch(() => 0))) {
+        // Só um sistema (CMD-COLETA) → qualquer ACESSAR serve.
+        acessar = page.getByText('ACESSAR', { exact: true }).first();
+      }
       try {
         const [novaAba] = await Promise.all([
           this.context!.waitForEvent('page', { timeout: 8000 }),
-          page.getByText('ACESSAR', { exact: true }).click({ timeout: 5000 }),
+          acessar.click({ timeout: 5000 }),
         ]);
         await novaAba.waitForLoadState();
         this.page = novaAba;
