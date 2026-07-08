@@ -45,6 +45,20 @@ export function normalize(texto: unknown): string {
 }
 
 /**
+ * Remove o registro do conselho (CRM/CRO/COREN/…) e o número do nome do médico.
+ * Ex.: "Lucas Eduardo da Silva Martins - CRM AM 10408" -> "Lucas Eduardo da Silva Martins".
+ * O CMD busca o profissional só pelo NOME; o "- CRM …" fazia a busca falhar.
+ */
+export function limparNomeMedico(nome: unknown): string {
+  const s = String(nome ?? '').trim();
+  if (!s) return s;
+  return s
+    .replace(/[\s\-/,;.|]*\b(CRM|CRO|COREN|CRF|CRP|CREFITO|CRN|CRBM|CRMV|CRFA|RQE)\b.*$/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/**
  * Converte um valor de célula em data 'YYYY-MM-DD' (ou null). Aceita Date,
  * e strings nos formatos d/m/Y, Y-m-d, d-m-Y. Remove horário se presente.
  */

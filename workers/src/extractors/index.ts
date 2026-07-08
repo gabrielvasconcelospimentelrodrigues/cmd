@@ -1,5 +1,6 @@
 import { extrairPlanilha } from './spreadsheet';
 import { importarComMapa, type CampoImportacao } from './mapped-import';
+import { limparNomeMedico } from './aliases';
 import type { PatientData } from './types';
 
 /**
@@ -29,7 +30,8 @@ export async function extrairPacientes(
     return linhas.map((l) => {
       // Obrigatórios: cns (aceita CPF ou CNS) + data_atendimento + médico.
       // Nome/CID são preenchidos pelo CMD a partir do CNS, então não bloqueiam.
-      const fundamentais = { cns: l.cns, data_atendimento: l.data_atendimento, medico_nome: l.profissional };
+      const medicoLimpo = limparNomeMedico(l.profissional); // tira "- CRM AM 10408"
+      const fundamentais = { cns: l.cns, data_atendimento: l.data_atendimento, medico_nome: medicoLimpo };
       const extraction_method: Record<string, string> = {};
       const campos_incertos: string[] = [];
       for (const [campo, val] of Object.entries(fundamentais)) {
@@ -42,7 +44,7 @@ export async function extrairPacientes(
         data_nascimento: l.data_nascimento,
         data_atendimento: l.data_atendimento,
         cid10_codigo: '',
-        medico_nome: l.profissional,
+        medico_nome: medicoLimpo,
         modalidade: normalizarModalidade(l.modalidade),
         extraction_method,
         campos_incertos,

@@ -2,7 +2,7 @@
  * Extrator de planilha — porta de spreadsheet_extractor.py.
  * Lê CSV/Excel, ADIVINHA as colunas pelos aliases e produz PatientData[].
  */
-import { ALIASES_COLUNA, normalize, parseData } from './aliases';
+import { ALIASES_COLUNA, normalize, parseData, limparNomeMedico } from './aliases';
 import { lerCsv, lerExcel, type Matriz } from './readers';
 import { CAMPOS_FUNDAMENTAIS, type PatientData } from './types';
 
@@ -30,7 +30,7 @@ function linhaParaPaciente(mapa: Record<string, number>, linha: (string | null)[
   const nome = valor('nome') ?? '';
   const cns = (valor('cns') ?? '').trim();
   const cid10_codigo = (valor('cid10_codigo') ?? '').trim().toUpperCase();
-  const medico_nome = valor('medico_nome') ?? '';
+  const medico_nome = limparNomeMedico(valor('medico_nome') ?? ''); // tira "- CRM …"
   const data_nascimento = parseData(valor('data_nascimento'));
   const data_atendimento = parseData(valor('data_atendimento'));
 

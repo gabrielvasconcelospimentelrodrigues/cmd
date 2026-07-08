@@ -1,0 +1,2 @@
+const {Pool}=require("pg");require("dotenv").config();const p=new Pool({connectionString:process.env.DATABASE_URL});
+(async()=>{const {rows}=await p.query("select status,current_step,patients_registered r,patients_errored e from uploads where id=107");const x=rows[0];console.log("status="+x.status+" reg="+x.r+" err="+x.e+" | "+String(x.current_step||"").slice(0,40));await p.end();})().catch(e=>console.log("db"));

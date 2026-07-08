@@ -1,6 +1,7 @@
 import { chromium, type Browser, type BrowserContext, type Page, type CDPSession } from 'playwright';
 import { connection } from '../lib/redis';
 import { generateTotp } from './totp';
+import { limparNomeMedico } from '../extractors/aliases';
 
 /**
  * Automação do portal Acesso Saúde / CMD-COLETA (gov.br) — porta de
@@ -705,18 +706,22 @@ export class WebAutomator {
 
   /** Busca o médico no select 'profissional' e seleciona a opção mais próxima. */
   private async selecionarProfissional(medicoNome: string): Promise<void> {
-    if (!medicoNome) throw new ProfessionalNotFoundError('Nome do médico não foi extraído da ficha (carimbo ilegível ou ausente).');
+    // Limpa o registro do conselho ("- CRM AM 10408") — o CMD busca só pelo nome.
+    const nome = limparNomeMedico(medicoNome);
+    if (!nome) throw new ProfessionalNotFoundError('Nome do médico não foi extraído da ficha (carimbo ilegível ou ausente).');
     const page = this.page!;
     const container = page.locator('app-procedimento').locator('ng-autocomplete[formcontrolname="profissional"]');
     const inputBox = container.locator('input');
     await inputBox.click();
-    const partes = medicoNome.split(/\s+/);
-    const termoBusca = partes.length ? partes[partes.length - 1]! : medicoNome;
+    // Digita da ESQUERDA para a direita (primeiros nomes), não o último sobrenome.
+    // Usa os 2 primeiros nomes para filtrar; a escolha final é pelo nome COMPLETO.
+    const partes = nome.split(/\s+/).filter(Boolean);
+    const termoBusca = partes.slice(0, 2).join(' ') || nome;
     await inputBox.pressSequentially(termoBusca, { delay: 100 });
     await page.waitForTimeout(2000);
     const opcoes = await container.locator('.suggestions-container.is-visible li').allInnerTexts();
-    const match = findBestMatch(medicoNome, opcoes);
-    if (!match) throw new ProfessionalNotFoundError(`Profissional '${medicoNome}' não foi encontrado na lista do portal. Opções vistas: ${opcoes.join(' | ')}`);
+    const match = findBestMatch(nome, opcoes);
+    if (!match) throw new ProfessionalNotFoundError(`Profissional '${nome}' não foi encontrado na lista do portal. Opções vistas: ${opcoes.join(' | ')}`);
     await container.getByText(match, { exact: false }).first().click();
     await page.waitForTimeout(500);
   }
