@@ -21,7 +21,7 @@ const URL_LOGIN = 'https://acesso.saude.gov.br/login';
 const PROVISORIO_LOGIN_ATE_CONTATOS_MS = 5 * 60_000;
 
 // Códigos de procedimento (SIGTAP) — porta de PROCEDURE_CODES (web_automation.py).
-// 1 a 5 valem a partir de 9 anos; 6 substitui o 1 para 0 a 8 anos.
+// 1 a 5 (+7) valem a partir de 9 anos; 6 substitui o 1 para 0 a 8 anos.
 const PROCEDURE_CODES: Record<number, [string, string]> = {
   1: ['0905010035', 'OCI AVALIAÇÃO INICIAL EM OFTALMOLOGIA - A PARTIR DE 9 ANOS'],
   2: ['0211060020', 'BIOMICROSCOPIA DE FUNDO DE OLHO'],
@@ -29,6 +29,7 @@ const PROCEDURE_CODES: Record<number, [string, string]> = {
   4: ['0211060259', 'TONOMETRIA'],
   5: ['0301010072', 'CONSULTA MEDICA EM ATENÇÃO ESPECIALIZADA'],
   6: ['0905010019', 'OCI AVALIAÇÃO INICIAL EM OFTALMOLOGIA - 0 A 8 ANOS'],
+  7: ['0211060232', 'TESTE ORTÓPTICO'], // 6ª OCI — só para 9+ anos (não-cirurgia)
 };
 
 export class ProfessionalNotFoundError extends Error {}
@@ -687,7 +688,8 @@ export class WebAutomator {
   private calculateProcedureCodes(dataNascimento: Date | null, dataAtendimento: Date): number[] {
     const idade = this.idadeNaData(dataNascimento, dataAtendimento);
     if (idade === null) throw new Error('Data de nascimento ausente — não é possível calcular o procedimento correto.');
-    return idade <= 8 ? [6, 2, 3, 4, 5] : [1, 2, 3, 4, 5];
+    // 0–8 anos: 5 OCIs (inalterado). 9+ anos: 6 OCIs (acrescido o 7 - TESTE ORTÓPTICO).
+    return idade <= 8 ? [6, 2, 3, 4, 5] : [1, 2, 3, 4, 5, 7];
   }
 
   /**
