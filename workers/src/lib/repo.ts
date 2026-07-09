@@ -113,10 +113,13 @@ export async function listarPendentes(uploadId: number): Promise<PendentePacient
   return (data ?? []) as unknown as PendentePaciente[];
 }
 
-/** Deduplicação: já existe cadastro do MESMO CNS + data de atendimento nesta
- * conta CMD (em outro registro)? Evita cadastrar o mesmo paciente 2x no gov
- * (herdado de intake/tasks.py — importante com listas em paralelo no mesmo login). */
-export async function jaCadastrado(clinicAccountId: number, cns: string, dataAtendimento: string | null, excludePatientId: number): Promise<boolean> {
+/** Deduplicação: já existe cadastro do MESMO CNS + data de atendimento + MESMA
+ * modalidade nesta conta CMD? Evita cadastrar o mesmo paciente 2x no gov.
+ * A modalidade entra na chave por causa da CATARATA: o paciente opera os dois
+ * olhos em DIAS SEPARADOS (faturados à parte), então mesmo CNS em DATAS
+ * diferentes NÃO é duplicidade — só é duplicado se for a MESMA data (mesmo
+ * olho/dia). E catarata nunca colide com OCI (modalidade diferente). */
+export async function jaCadastrado(clinicAccountId: number, cns: string, dataAtendimento: string | null, excludePatientId: number, modalidade: string = 'oci'): Promise<boolean> {
   if (!cns || !dataAtendimento) return false;
   const { count } = await supabaseAdmin
     .from('patient_records')
@@ -124,6 +127,7 @@ export async function jaCadastrado(clinicAccountId: number, cns: string, dataAte
     .eq('clinic_account_id', clinicAccountId)
     .eq('cns', cns)
     .eq('data_atendimento', dataAtendimento)
+    .eq('modalidade', modalidade === 'catarata' ? 'catarata' : 'oci')
     .in('status', ['registered', 'verified_ok', 'verified_divergent'])
     .neq('id', excludePatientId);
   return (count ?? 0) > 0;
@@ -134,13 +138,18 @@ export async function jaCadastrado(clinicAccountId: number, cns: string, dataAte
  * repete dentro da própria lista. Os duplicados vão para PENDÊNCIAS
  * (needs_review) para tratamento manual. Retorna quantos foram marcados. */
 export async function marcarDuplicados(uploadId: number, tenantId: number): Promise<number> {
+  // Chave de dedup = CNS + data + MODALIDADE. Para CATARATA, os dois olhos são
+  // operados em DATAS diferentes (faturados à parte) → datas diferentes NÃO são
+  // duplicidade; só a MESMA data conta. A modalidade na chave também impede
+  // catarata colidir com OCI.
+  const mod = (m: string | null | undefined) => (m === 'catarata' ? 'catarata' : 'oci');
   const { data: pend } = await supabaseAdmin
     .from('patient_records')
-    .select('id, cns, data_atendimento')
+    .select('id, cns, data_atendimento, modalidade')
     .eq('upload_id', uploadId)
     .eq('status', 'pending_registration')
     .order('id', { ascending: true });
-  const pendentes = (pend ?? []) as { id: number; cns: string | null; data_atendimento: string | null }[];
+  const pendentes = (pend ?? []) as { id: number; cns: string | null; data_atendimento: string | null; modalidade: string | null }[];
   if (pendentes.length === 0) return 0;
 
   const { data: cas } = await supabaseAdmin.from('clinic_accounts').select('id').eq('tenant_id', tenantId);
@@ -149,11 +158,11 @@ export async function marcarDuplicados(uploadId: number, tenantId: number): Prom
   if (caIds.length > 0) {
     const { data: reg } = await supabaseAdmin
       .from('patient_records')
-      .select('cns, data_atendimento')
+      .select('cns, data_atendimento, modalidade')
       .in('clinic_account_id', caIds)
       .in('status', ['registered', 'verified_ok', 'verified_divergent', 'done_manually']);
-    for (const r of (reg ?? []) as { cns: string | null; data_atendimento: string | null }[]) {
-      if (r.cns && r.data_atendimento) jaCad.add(`${r.cns}|${r.data_atendimento}`);
+    for (const r of (reg ?? []) as { cns: string | null; data_atendimento: string | null; modalidade: string | null }[]) {
+      if (r.cns && r.data_atendimento) jaCad.add(`${r.cns}|${r.data_atendimento}|${mod(r.modalidade)}`);
     }
   }
 
@@ -161,7 +170,7 @@ export async function marcarDuplicados(uploadId: number, tenantId: number): Prom
   const dupIds: number[] = [];
   for (const p of pendentes) {
     if (!p.cns || !p.data_atendimento) continue;
-    const chave = `${p.cns}|${p.data_atendimento}`;
+    const chave = `${p.cns}|${p.data_atendimento}|${mod(p.modalidade)}`;
     if (jaCad.has(chave) || vistos.has(chave)) dupIds.push(p.id);
     else vistos.add(chave);
   }

@@ -200,9 +200,11 @@ export function startRegistrationWorker(): Worker<UploadJob> {
               // DEDUP: se este CNS+data já foi cadastrado nesta conta (outra
               // lista/retomada), NÃO cadastra de novo — manda para Pendências
               // como duplicado, para tratamento manual (envio manual).
-              if (await jaCadastrado(conta.id, p.cns, p.data_atendimento, p.id)) {
-                await marcarPaciente(p.id, 'needs_review', 'Cadastro duplicado — mesmo CNS já cadastrado nesta data de atendimento.');
-                await logEntry(uploadId, 'WARN', `${p.nome || p.cns}: duplicado (mesmo CNS+data) — enviado para Pendências.`);
+              // Dedup considera a MODALIDADE: catarata só é duplicada se mesma
+              // data (mesmo olho/dia) — olhos em dias diferentes sobem normal.
+              if (await jaCadastrado(conta.id, p.cns, p.data_atendimento, p.id, pd.modalidade)) {
+                await marcarPaciente(p.id, 'needs_review', 'Cadastro duplicado — mesmo CNS já cadastrado nesta data de atendimento (mesma modalidade).');
+                await logEntry(uploadId, 'WARN', `${p.nome || p.cns}: duplicado (mesmo CNS+data+modalidade) — enviado para Pendências.`);
                 await atualizarContadores(uploadId, registered, errored);
                 continue;
               }
