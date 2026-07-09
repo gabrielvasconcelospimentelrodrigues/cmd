@@ -499,6 +499,10 @@ export class WebAutomator {
    * excluída, cadastro manual. Retorna -1 se não conseguiu pesquisar (aí o
    * chamador NÃO bloqueia, para não travar cadastro legítimo). */
   async contarContatosNoCmd(cns: string): Promise<number> {
+    // Desligada por padrão: a busca no CMD (2×/cadastro) somava ~30s e, com o
+    // gov lento em horário comercial, estourava o timeout do cadastro. Liga só
+    // com DEDUP_CMD=1. Sem ela, a anti-duplicidade fica no timeout/retry-guard.
+    if (process.env.DEDUP_CMD !== '1') return -1;
     const page = this.page;
     const cnsLimpo = String(cns ?? '').replace(/\D/g, '');
     if (!page || !cnsLimpo) return -1;
