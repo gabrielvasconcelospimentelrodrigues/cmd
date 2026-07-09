@@ -508,10 +508,13 @@ export class WebAutomator {
       if (!(await busca.isVisible({ timeout: 6000 }).catch(() => false))) return -1;
       await busca.click({ timeout: 4000 }).catch(() => {});
       await busca.fill('').catch(() => {});
-      await busca.fill(cnsLimpo).catch(() => {});
+      // ion-searchbar tem debounce e SÓ filtra com eventos reais de teclado —
+      // fill() não dispara. Digita char a char e dá Enter (dispara o ionChange).
+      await busca.pressSequentially(cnsLimpo, { delay: 60 }).catch(() => {});
+      await page.waitForTimeout(700); // debounce 500ms
+      await busca.press('Enter').catch(() => {});
       const btn = page.getByRole('button', { name: 'Buscar', exact: true }).first();
       if (await btn.count().catch(() => 0)) await btn.click({ timeout: 5000 }).catch(() => {});
-      else await busca.press('Enter').catch(() => {});
       await page.waitForTimeout(3500);
       // DEBUG: fotografa + salva HTML da tela de busca para achar o seletor certo.
       if (process.env.DEBUG_BUSCA === '1') {
@@ -520,16 +523,18 @@ export class WebAutomator {
         const html = await page.content().catch(() => '');
         await import('node:fs/promises').then((fs) => fs.writeFile(`${dir}/busca_${cnsLimpo}.html`, html, 'utf8')).catch(() => {});
       }
-      // Várias estratégias de contagem (a estrutura da tabela do CMD é incerta).
-      const exato = await page.getByText(cnsLimpo, { exact: true }).count().catch(() => 0);
+      // Resultados vêm como CARDS (ion-card). Após filtrar pelo CNS, cada card é
+      // um contato do paciente. Conta os cards que contêm o CNS.
+      const cards = await page.locator(`ion-card:has-text("${cnsLimpo}"), .card:has-text("${cnsLimpo}")`).count().catch(() => 0);
       const contendo = await page.getByText(cnsLimpo, { exact: false }).count().catch(() => 0);
-      const linhasTr = await page.locator(`tr:has-text("${cnsLimpo}")`).count().catch(() => 0);
-      const linhasDatatable = await page.locator(`datatable-body-row:has-text("${cnsLimpo}"), .datatable-body-row:has-text("${cnsLimpo}")`).count().catch(() => 0);
+      const totalCards = await page.locator('ion-card').count().catch(() => 0);
       // DEBUG: amostra do que apareceu na tela após a busca.
-      const amostra = (await page.locator('datatable-body, table, ion-content, body').first().innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
-      console.log(`[DEDUP CMD] CNS ${cnsLimpo} exato=${exato} contendo=${contendo} tr=${linhasTr} datatable=${linhasDatatable} | tela: ${amostra}`);
-      const n = Math.max(linhasDatatable, linhasTr, exato);
-      return n;
+      const amostra = (await page.locator('ion-content, body').first().innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 260);
+      console.log(`[DEDUP CMD] CNS ${cnsLimpo} cards=${cards} contendo=${contendo} totalCards=${totalCards} | tela: ${amostra}`);
+      // Se o filtro funcionou (poucos cards), usa a contagem por CNS; se veio a
+      // lista inteira (muitos cards, filtro falhou), NÃO arrisca bloquear (-1).
+      if (totalCards > 20 && cards === 0) return -1;
+      return Math.max(cards, contendo);
     } catch (e) {
       console.log(`[DEDUP CMD] falha ao pesquisar CNS ${cnsLimpo}: ${(e as Error).message.slice(0, 60)}`);
       return -1;
