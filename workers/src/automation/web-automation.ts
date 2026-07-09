@@ -513,6 +513,13 @@ export class WebAutomator {
       if (await btn.count().catch(() => 0)) await btn.click({ timeout: 5000 }).catch(() => {});
       else await busca.press('Enter').catch(() => {});
       await page.waitForTimeout(3500);
+      // DEBUG: fotografa + salva HTML da tela de busca para achar o seletor certo.
+      if (process.env.DEBUG_BUSCA === '1') {
+        const dir = process.env.DEBUG_CADASTRO_DIR || '/tmp/cmddebug';
+        await page.screenshot({ path: `${dir}/busca_${cnsLimpo}.png`, fullPage: true }).catch(() => {});
+        const html = await page.content().catch(() => '');
+        await import('node:fs/promises').then((fs) => fs.writeFile(`${dir}/busca_${cnsLimpo}.html`, html, 'utf8')).catch(() => {});
+      }
       // Várias estratégias de contagem (a estrutura da tabela do CMD é incerta).
       const exato = await page.getByText(cnsLimpo, { exact: true }).count().catch(() => 0);
       const contendo = await page.getByText(cnsLimpo, { exact: false }).count().catch(() => 0);

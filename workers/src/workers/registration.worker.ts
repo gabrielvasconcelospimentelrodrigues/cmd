@@ -239,6 +239,10 @@ export function startRegistrationWorker(): Worker<UploadJob> {
                 await registrarExecucao({ tenantId: conta.tenant_id, empresaId: conta.empresa_id, clinicAccountId: conta.id, uploadId, patientId: p.id });
                 registered++;
                 await logEntry(uploadId, 'INFO', `✓ ${p.nome || p.cns} cadastrado no CMD-COLETA.`);
+                // VALIDAÇÃO da busca anti-duplicidade: acabou de cadastrar → a
+                // busca no CMD DEVE achar agora (>=1). Loga p/ confirmar o seletor.
+                const conf = await automator.contarContatosNoCmd(pd.cns).catch(() => -1);
+                await logEntry(uploadId, 'INFO', `[VALIDA DEDUP] ${p.nome || p.cns}: busca no CMD após cadastrar retornou ${conf} (esperado >=1).`);
               } else {
                 await marcarPaciente(p.id, 'error', (r.erro || 'erro').slice(0, 240));
                 errored++;
