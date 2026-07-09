@@ -15,6 +15,20 @@ let ultimoRun = 0;
  */
 export async function recuperarUploadsTravados(forcar = false): Promise<void> {
   try {
+    // ANTI-ÓRFÃ (roda SEMPRE, a cada 30s — fora do gate de 5 min): listas presas
+    // em 'extracted' "aguardando a conta CMD" precisam de um job de espera. O
+    // re-enqueue usa jobId FIXO (wait-conta-N): se já existe um job, o BullMQ
+    // ignora (não empilha); se o job foi perdido (órfã), re-adiciona e recupera.
+    const { data: aguardando } = await supabaseAdmin
+      .from('uploads')
+      .select('id')
+      .eq('status', 'extracted')
+      .is('deleted_at', null)
+      .ilike('current_step', '%aguardando a conta%');
+    for (const up of (aguardando ?? [])) {
+      await registrationQueue.add('registrar', { uploadId: up.id }, { delay: 3_000, jobId: `wait-conta-${up.id}`, removeOnComplete: true, removeOnFail: true }).catch(() => {});
+    }
+
     const config = await getMotorConfig().catch(() => ({ watchdog_interval_minutos: 5 }));
     const agora = Date.now();
     if (!forcar && (agora - ultimoRun < config.watchdog_interval_minutos * 60_000)) {
@@ -32,20 +46,6 @@ export async function recuperarUploadsTravados(forcar = false): Promise<void> {
       console.error('[watchdog] erro ao buscar travados:', error.message);
       return;
     }
-    // Rede de segurança: listas presas em 'extracted' com o passo "aguardando a
-    // conta CMD" que ficaram ÓRFÃS (sem job na fila) — re-enfileira para não
-    // ficarem paradas pra sempre.
-    const { data: aguardando } = await supabaseAdmin
-      .from('uploads')
-      .select('id, current_step')
-      .eq('status', 'extracted')
-      .is('deleted_at', null)
-      .ilike('current_step', '%aguardando a conta%');
-    for (const up of (aguardando ?? [])) {
-      await registrationQueue.add('registrar', { uploadId: up.id }, { delay: 3_000, removeOnComplete: true, removeOnFail: true });
-      await logEntry(up.id, 'WARN', '[RECUPERAÇÃO] Presa em "aguardando a conta" — re-enfileirada para registro.');
-    }
-
     if (!travados?.length) return;
 
     for (const up of travados) {
