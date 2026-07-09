@@ -591,7 +591,9 @@ export class WebAutomator {
    * completam de verdade após esse loop). */
   private async aguardarModalCarregamento(timeoutAparecer = 4000, timeoutDesaparecer = 60_000): Promise<void> {
     const page = this.page!;
-    const carregando = page.getByText('Carregando', { exact: false }).first();
+    // Também espera o modal "Salvando rascunho do contato assistencial…" — se não
+    // esperar, o clique em Finalizar cai no backdrop e o cadastro fica em rascunho.
+    const carregando = page.getByText(/Carregando|Salvando/i).first();
     try {
       await carregando.waitFor({ state: 'visible', timeout: timeoutAparecer });
       await carregando.waitFor({ state: 'hidden', timeout: timeoutDesaparecer });
@@ -1049,19 +1051,34 @@ export class WebAutomator {
       return;
     }
 
-    this.passo(`Salvando e finalizando cadastro de ${nome || 'paciente'}...`);
+    this.passo(`Salvando cadastro de ${nome || 'paciente'}...`);
     T('FINALIZAÇÃO: fotografa form completo e vai clicar Salvar');
     await this.capturarDebug(`antes_salvar_${cns}`).catch(() => {});
     await page.getByRole('button', { name: 'Salvar' }).click({ timeout: 15_000 }).catch(() => {});
-    T('Salvar CLICADO → aguarda modal carregando');
-    await this.aguardarModalCarregamento();
-    // Após Salvar pode aparecer um modal de VALIDAÇÃO (campos faltando) — fotografa.
+    T('Salvar CLICADO → aguarda "Salvando rascunho…" terminar');
+    // ESPERA o rascunho terminar de salvar (modal "Salvando rascunho…") ANTES de
+    // clicar Finalizar — senão o clique cai no backdrop e o cadastro fica em
+    // RASCUNHO (nunca finaliza). Espera generosa (gov lento).
+    await this.aguardarModalCarregamento(6000, 120_000);
+    await page.waitForTimeout(1500);
     await this.capturarDebug(`apos_salvar_${cns}`).catch(() => {});
+
+    this.passo(`Finalizando cadastro de ${nome || 'paciente'}...`);
     const btnFinalizar = page.getByRole('button', { name: 'Finalizar' }).first();
-    T('vai clicar Finalizar');
-    await btnFinalizar.click({ timeout: 15_000 }).catch(() => {});
-    T('Finalizar CLICADO → aguarda modal');
-    await this.aguardarModalCarregamento();
+    await btnFinalizar.waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {});
+    // Clica Finalizar e CONFIRMA que o form fechou; se não, tenta de novo (até 3x),
+    // fechando qualquer overlay/modal que esteja interceptando o clique.
+    for (let tent = 0; tent < 3; tent++) {
+      await this.fecharOverlayAutocomplete().catch(() => {});
+      await this.aguardarModalCarregamento(1500, 120_000); // garante que nenhum "Salvando…" está na frente
+      T(`vai clicar Finalizar (tentativa ${tent + 1})`);
+      await btnFinalizar.click({ timeout: 12_000 }).catch(() => {});
+      await this.aguardarModalCarregamento(4000, 120_000);
+      await page.waitForTimeout(1500);
+      // Finalizar sumiu = form fechou = finalizou. Sai do laço.
+      if (!(await btnFinalizar.isVisible({ timeout: 2500 }).catch(() => false))) { T('Finalizar sumiu — finalizou'); break; }
+      T('Finalizar ainda visível — vai tentar de novo');
+    }
     await this.capturarDebug(`apos_finalizar_${cns}`).catch(() => {});
     T('finalização concluída → confirma volta à lista');
 
