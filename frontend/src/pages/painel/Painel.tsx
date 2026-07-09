@@ -715,7 +715,10 @@ function EnviosRecentes({ empresas = [], uploads, contas = [], onChange, showToa
     } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); }
   };
 
-  const isRunning = (u: Upload) => ['registering', 'extracting', 'extracted'].includes(u.status);
+  const isRunning = (u: Upload) => ['registering', 'extracting'].includes(u.status);
+  // 'extracted' = extraída e AGUARDANDO o cadastro começar (janela do delay
+  // "antes de iniciar" da config). Aqui mostramos o Play p/ iniciar já, sem esperar.
+  const aguardandoDelay = (u: Upload) => u.status === 'extracted';
   const temPendentes = (u: Upload) => u.patients_found > 0 && u.patients_registered + u.patients_errored < u.patients_found;
   const cols = simple ? '1fr 190px 160px 110px 140px' : '1fr 190px 80px 92px 62px 92px 100px 128px';
   return (
@@ -741,6 +744,11 @@ function EnviosRecentes({ empresas = [], uploads, contas = [], onChange, showToa
               <>
                 <button onClick={() => mostrarAoVivo(u)} title="Ver robô ao vivo" style={{ ...actBtn, color: 'var(--c-cyan)' }}><Radio size={15} /></button>
                 <button onClick={() => controle(u, 'pausar')} title="Pausar" style={{ ...actBtn, color: 'var(--c-warn)' }}><Pause size={15} /></button>
+                <button onClick={() => setPararAlvo(u)} title="Parar" style={{ ...actBtn, color: 'var(--c-err)' }}><Square size={14} /></button>
+              </>
+            ) : aguardandoDelay(u) ? (
+              <>
+                <button onClick={() => cliqueIniciar(u)} title="Iniciar agora (sem esperar o tempo de delay)" style={{ ...actBtn, color: 'var(--c-ok)' }}><Play size={15} /></button>
                 <button onClick={() => setPararAlvo(u)} title="Parar" style={{ ...actBtn, color: 'var(--c-err)' }}><Square size={14} /></button>
               </>
             ) : u.status === 'paused' ? (
