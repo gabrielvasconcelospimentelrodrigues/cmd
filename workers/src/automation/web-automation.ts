@@ -493,6 +493,36 @@ export class WebAutomator {
     }
   }
 
+  /** Conta quantos contatos já existem no CMD para este CNS (pesquisando na
+   * lista "Contatos Assistenciais"). É a verificação de duplicidade NA FONTE (o
+   * próprio CMD), que pega o que o nosso banco não sabe: retry que salvou, lista
+   * excluída, cadastro manual. Retorna -1 se não conseguiu pesquisar (aí o
+   * chamador NÃO bloqueia, para não travar cadastro legítimo). */
+  async contarContatosNoCmd(cns: string): Promise<number> {
+    const page = this.page;
+    const cnsLimpo = String(cns ?? '').replace(/\D/g, '');
+    if (!page || !cnsLimpo) return -1;
+    try {
+      await this.recuperarParaContatos();
+      const busca = page.locator('input[placeholder*="Busque"], input[placeholder*="CPF"], input[placeholder*="CNS"], input[placeholder*="UUID"]').first();
+      if (!(await busca.isVisible({ timeout: 6000 }).catch(() => false))) return -1;
+      await busca.click({ timeout: 4000 }).catch(() => {});
+      await busca.fill('').catch(() => {});
+      await busca.fill(cnsLimpo).catch(() => {});
+      const btn = page.getByRole('button', { name: 'Buscar', exact: true }).first();
+      if (await btn.count().catch(() => 0)) await btn.click({ timeout: 5000 }).catch(() => {});
+      else await busca.press('Enter').catch(() => {});
+      await page.waitForTimeout(2500);
+      // Cada linha de resultado mostra o CNS na coluna CPF/CNS — conta as ocorrências.
+      const n = await page.getByText(cnsLimpo, { exact: true }).count().catch(() => 0);
+      console.log(`[DEDUP CMD] CNS ${cnsLimpo} -> ${n} contato(s) no CMD`);
+      return n;
+    } catch (e) {
+      console.log(`[DEDUP CMD] falha ao pesquisar CNS ${cnsLimpo}: ${(e as Error).message.slice(0, 60)}`);
+      return -1;
+    }
+  }
+
   /** Clica em 'Sair com segurança' no menu lateral. Porta de logout. */
   async logout(): Promise<void> {
     try {

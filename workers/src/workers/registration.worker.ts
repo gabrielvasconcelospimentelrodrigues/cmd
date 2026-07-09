@@ -208,9 +208,21 @@ export function startRegistrationWorker(): Worker<UploadJob> {
                 await atualizarContadores(uploadId, registered, errored);
                 continue;
               }
+              // VERIFICAÇÃO NA FONTE (CMD): pesquisa o CNS no próprio CMD-COLETA
+              // antes de cadastrar. Pega duplicidade que o nosso banco não sabe
+              // (retry que salvou, lista excluída, cadastro manual). OCI: já ter
+              // 1 contato basta p/ pular; Catarata: até 2 (os dois olhos).
+              const limiteCmd = pd.modalidade === 'catarata' ? 2 : 1;
+              const nCmdAntes = await comTimeout(automator.contarContatosNoCmd(pd.cns), 40_000, 'busca-cmd').catch(() => -1);
+              if (nCmdAntes >= limiteCmd) {
+                await marcarPaciente(p.id, 'needs_review', `Já cadastrado no CMD-COLETA (${nCmdAntes} contato[s]) — não recadastrado para evitar duplicidade.`);
+                await logEntry(uploadId, 'WARN', `${p.nome || p.cns}: ${nCmdAntes} contato(s) já no CMD (limite ${limiteCmd}) — pulado (anti-duplicidade).`);
+                await atualizarContadores(uploadId, registered, errored);
+                continue;
+              }
               let r: { ok: boolean; erro?: string };
               try {
-                r = await comTimeout(cadastrarComRetry(automator, pd, uploadId), cadastroTimeoutMs, 'cadastro');
+                r = await comTimeout(cadastrarComRetry(automator, pd, uploadId, nCmdAntes), cadastroTimeoutMs, 'cadastro');
               } catch (e) {
                 // Esse paciente TRAVOU. Recupera a sessão p/ os próximos e o
                 // manda para Pendências (não congela o lote inteiro).
@@ -325,8 +337,21 @@ export function startRegistrationWorker(): Worker<UploadJob> {
  * Sem essa recuperação entre pacientes, um único erro deixa a página presa no
  * formulário e TODOS os próximos falham no primeiro clique (cascata).
  */
-async function cadastrarComRetry(automator: WebAutomator, pd: PatientData, uploadId: number): Promise<{ ok: boolean; erro?: string }> {
+async function cadastrarComRetry(automator: WebAutomator, pd: PatientData, uploadId: number, nCmdAntes: number): Promise<{ ok: boolean; erro?: string }> {
   const quem = pd.nome || pd.cns;
+  // GUARDA ANTI-DUPLICIDADE: antes de re-tentar, confere se a tentativa anterior
+  // JÁ criou o contato no CMD (o Salvar/Finalizar pode ter salvo mesmo com a
+  // confirmação estourando o tempo). Se apareceu contato novo, NÃO recadastra —
+  // essa era a causa principal de duplicidade (retry após "falso-negativo").
+  const jaSubiuNoCmd = async (): Promise<boolean> => {
+    if (nCmdAntes < 0) return false; // não sabíamos o antes → não arrisca
+    const n = await automator.contarContatosNoCmd(pd.cns).catch(() => -1);
+    if (n >= 0 && n > nCmdAntes) {
+      await logEntry(uploadId, 'INFO', `${quem}: já apareceu no CMD (${n} contato[s]) — a tentativa anterior salvou; não recadastra.`);
+      return true;
+    }
+    return false;
+  };
   // 1ª tentativa
   try {
     await automator.incluirContato(pd);
@@ -340,8 +365,9 @@ async function cadastrarComRetry(automator: WebAutomator, pd: PatientData, uploa
     }
     await logEntry(uploadId, 'WARN', `${quem}: ${(e as Error).message.slice(0, 110)} — voltando à lista e tentando de novo (2ª).`);
   }
-  // 2ª tentativa: recupera a página e repete
+  // 2ª tentativa: recupera a página; se a 1ª já salvou, para aqui (não duplica).
   await automator.recuperarParaContatos();
+  if (await jaSubiuNoCmd()) return { ok: true };
   try {
     await automator.incluirContato(pd);
     await logEntry(uploadId, 'INFO', `${quem}: ok na 2ª tentativa.`);
@@ -349,9 +375,11 @@ async function cadastrarComRetry(automator: WebAutomator, pd: PatientData, uploa
   } catch (e) {
     await logEntry(uploadId, 'WARN', `${quem}: persistiu (${(e as Error).message.slice(0, 80)}) — sessão nova (relogin), 3ª tentativa.`);
   }
-  // 3ª tentativa: relogin e última tentativa
+  // 3ª tentativa: relogin e última tentativa (conferindo o CMD antes de cada uma).
+  if (await jaSubiuNoCmd()) return { ok: true };
   try {
     await automator.relogar();
+    if (await jaSubiuNoCmd()) return { ok: true };
     await automator.incluirContato(pd);
     await logEntry(uploadId, 'INFO', `${quem}: ok na 3ª tentativa (sessão nova).`);
     return { ok: true };
