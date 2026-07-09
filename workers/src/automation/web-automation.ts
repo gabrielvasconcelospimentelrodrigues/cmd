@@ -162,7 +162,7 @@ export class WebAutomator {
     }
     this.context = await this.browser.newContext({ viewport: { width: 1280, height: 800 } });
     this.page = await this.context.newPage();
-    this.page.setDefaultTimeout(45_000);
+    this.page.setDefaultTimeout(75_000);
     await this.startScreencast();
   }
 
@@ -402,7 +402,7 @@ export class WebAutomator {
         ]);
         await novaAba.waitForLoadState();
         this.page = novaAba;
-        this.page.setDefaultTimeout(45_000);
+        this.page.setDefaultTimeout(75_000);
         await this.stopScreencast();
         await this.startScreencast();
         await this.page.waitForTimeout(2000);
@@ -634,7 +634,7 @@ export class WebAutomator {
     const inputBox = container.locator('input');
     // Um alerta "alterar o procedimento" pendente intercepta o clique — confirma antes.
     await this.confirmarAlterarProcedimento();
-    await inputBox.click({ timeout: 20_000 });
+    await inputBox.click({ timeout: 45_000 });
     // O próprio clique pode disparar o alerta — confirma e reclica no campo.
     if (await this.confirmarAlterarProcedimento()) {
       await inputBox.click({ timeout: 10_000 }).catch(() => {});
@@ -657,10 +657,10 @@ export class WebAutomator {
         await page.waitForTimeout(300);
       }
       await inputBox.pressSequentially(searchText, { delay: 100 });
-      // espera a sugestão aparecer (servidor lento) — até ~12s. Se uma alerta
+      // espera a sugestão aparecer (servidor lento) — até ~25s. Se uma alerta
       // aparecer no meio, confirma e segue esperando.
       let apareceu = false;
-      for (let i = 0; i < 120; i++) {
+      for (let i = 0; i < 250; i++) {
         if ((await sugestao.count().catch(() => 0)) > 0) { apareceu = true; break; }
         if (i % 15 === 14) await this.confirmarAlterarProcedimento();
         await page.waitForTimeout(100);
