@@ -80,7 +80,7 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
       return { colunas, sugestao, obrigatorios: CAMPOS_OBRIGATORIOS };
     } catch (e) {
       req.log.error(e);
-      return reply.code(400).send({ error: 'Falha ao ler o arquivo. Formatos aceitos: CSV, Excel (.xlsx) ou XML.' });
+      return reply.code(400).send({ error: 'Falha ao ler o arquivo. Formatos aceitos: CSV, Excel (.xlsx/.xlsm) ou XML.' });
     }
   });
 

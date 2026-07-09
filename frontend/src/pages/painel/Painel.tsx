@@ -620,7 +620,7 @@ function Enviar({ empresas, uploads, contas = [], isMember, onChange, showToast 
           </div>
           <div style={{ flex: 1, minWidth: 220, display: 'flex', flexDirection: 'column', gap: 6 }}>
             <label className="ia-label">Arquivo (CSV, Excel ou XML)</label>
-            <input key={fileKey} type="file" accept=".csv,.xlsx,.xml" onChange={(e) => setFile(e.target.files?.[0] ?? null)} style={{ display: 'block', color: 'var(--c-ink2)', fontSize: 13, border: '1px solid var(--c-border)', borderRadius: 8, padding: '7px 10px', background: 'var(--c-surface2)' }} />
+            <input key={fileKey} type="file" accept=".csv,.xlsx,.xlsm,.xml" onChange={(e) => setFile(e.target.files?.[0] ?? null)} style={{ display: 'block', color: 'var(--c-ink2)', fontSize: 13, border: '1px solid var(--c-border)', borderRadius: 8, padding: '7px 10px', background: 'var(--c-surface2)' }} />
           </div>
           <button onClick={abrirMapeamento} disabled={busy} className="ia-btn" style={{ height: 42, padding: '0 22px', fontSize: 14 }}><FileSpreadsheet size={16} /> {busy ? 'Lendo…' : 'Mapear e importar'}</button>
         </div>

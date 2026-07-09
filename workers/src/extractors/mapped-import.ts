@@ -3,7 +3,7 @@
  * importador_mapeado.py. O usuário vê as colunas/tags e escolhe qual é qual,
  * necessário para formatos de outros sistemas que os aliases não reconhecem.
  */
-import { ALIASES_COLUNA, normalize, parseData } from './aliases';
+import { ALIASES_COLUNA, normalize, parseData, acharLinhaCabecalho } from './aliases';
 import { lerCsv, lerExcel, lerXml } from './readers';
 
 /** Campos de destino do import mapeado (medico_nome lá == "profissional" aqui). */
@@ -40,7 +40,11 @@ async function lerArquivo(
 
   const matriz = filename.toLowerCase().endsWith('.csv') ? lerCsv(buffer) : await lerExcel(buffer);
   if (!matriz.length) return { colunas: [], linhas: [] };
-  const [cab, ...dados] = matriz;
+  // Acha a linha de cabeçalho (pode não ser a 1ª — ex.: template do CMD com
+  // títulos de seção em cima). Os dados vêm DEPOIS dela.
+  const idxCab = acharLinhaCabecalho(matriz);
+  const cab = matriz[idxCab] ?? [];
+  const dados = matriz.slice(idxCab + 1);
   const colunas = (cab ?? []).map((c) => (c !== null && c !== undefined ? String(c) : ''));
   const linhas = dados
     .filter((l) => l.some((c) => c !== null && c !== undefined && String(c).trim() !== ''))

@@ -59,26 +59,53 @@ function detectarDelimitador(amostra: string): string {
   return candidatos[0] && candidatos[0][1] > 0 ? candidatos[0][0] : ',';
 }
 
+/** Palavras que denunciam a LINHA DE CABEÇALHO (vs. linha de seção/título ou de
+ * dados). Alguns modelos (ex.: template oficial do CMD) têm uma linha de títulos
+ * de seção ACIMA do cabeçalho real — aqui achamos a linha certa. */
+const PALAVRAS_CABECALHO = ['cns', 'cpf', 'nome', 'medico', 'profissional', 'nascimento', 'modalidade', 'procedimento', 'sexo', 'cbo', 'admissao', 'atendimento', 'desfecho', 'diagnostico', 'estabelecimento', 'data', 'raca', 'municipio'];
+
+/** Entre as primeiras linhas, escolhe a que MAIS parece cabeçalho (mais células
+ * com palavras conhecidas). Assim ignora a linha de títulos de seção do CMD. */
+export function acharLinhaCabecalho(linhas: string[][]): number {
+  let melhor = 0, melhorScore = -1;
+  for (let i = 0; i < Math.min(linhas.length, 8); i++) {
+    const row = linhas[i] ?? [];
+    let score = 0;
+    for (const c of row) {
+      const n = normalize(c);
+      if (n && PALAVRAS_CABECALHO.some((k) => n.includes(k))) score++;
+    }
+    if (score > melhorScore) { melhorScore = score; melhor = i; }
+  }
+  return melhorScore >= 2 ? melhor : 0;
+}
+
 async function lerColunas(buffer: Buffer, filename: string): Promise<string[]> {
   if (ehXml(filename)) return colunasXml(buffer);
 
   if (filename.toLowerCase().endsWith('.csv')) {
     const texto = buffer.toString('utf8').replace(/^﻿/, '');
-    const linhas = parseCsv(texto, { delimiter: detectarDelimitador(texto), relax_column_count: true, skip_empty_lines: true, trim: false, to: 1 }) as string[][];
-    return (linhas[0] ?? []).map((c) => (c == null ? '' : String(c)));
+    const linhas = parseCsv(texto, { delimiter: detectarDelimitador(texto), relax_column_count: true, skip_empty_lines: false, trim: false, to: 8 }) as string[][];
+    const idx = acharLinhaCabecalho(linhas);
+    return (linhas[idx] ?? []).map((c) => (c == null ? '' : String(c)));
   }
 
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer as unknown as ArrayBuffer);
   const sheet = wb.worksheets[0];
   if (!sheet) return [];
-  const arr = sheet.getRow(1).values as unknown[];
-  const cols: string[] = [];
-  for (let i = 1; i < arr.length; i++) {
-    const v = arr[i];
-    cols.push(v == null ? '' : (typeof v === 'object' && 'text' in (v as object) ? String((v as { text: unknown }).text) : String(v)));
+  const primeiras: string[][] = [];
+  for (let r = 1; r <= Math.min(sheet.rowCount, 8); r++) {
+    const arr = sheet.getRow(r).values as unknown[];
+    const cols: string[] = [];
+    for (let i = 1; i < arr.length; i++) {
+      const v = arr[i];
+      cols.push(v == null ? '' : (typeof v === 'object' && 'text' in (v as object) ? String((v as { text: unknown }).text) : String(v)));
+    }
+    primeiras.push(cols);
   }
-  return cols;
+  const idx = acharLinhaCabecalho(primeiras);
+  return primeiras[idx] ?? [];
 }
 
 function colunasXml(buffer: Buffer): string[] {

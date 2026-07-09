@@ -49,6 +49,24 @@ export function normalize(texto: unknown): string {
  * Ex.: "Lucas Eduardo da Silva Martins - CRM AM 10408" -> "Lucas Eduardo da Silva Martins".
  * O CMD busca o profissional só pelo NOME; o "- CRM …" fazia a busca falhar.
  */
+/** Acha a LINHA de cabeçalho entre as primeiras (ignora linha de títulos de seção
+ * — ex.: template oficial do CMD tem "IDENTIFICAÇÃO DO INDIVÍDUO" na linha 1 e os
+ * nomes de coluna reais na linha 2). Escolhe a que mais tem palavras conhecidas. */
+const PALAVRAS_CABECALHO_ = ['cns', 'cpf', 'nome', 'medico', 'profissional', 'nascimento', 'modalidade', 'procedimento', 'sexo', 'cbo', 'admissao', 'atendimento', 'desfecho', 'diagnostico', 'estabelecimento', 'data', 'raca', 'municipio'];
+export function acharLinhaCabecalho(linhas: unknown[][]): number {
+  let melhor = 0, melhorScore = -1;
+  for (let i = 0; i < Math.min(linhas.length, 8); i++) {
+    const row = linhas[i] ?? [];
+    let score = 0;
+    for (const c of row) {
+      const n = normalize(c);
+      if (n && PALAVRAS_CABECALHO_.some((k) => n.includes(k))) score++;
+    }
+    if (score > melhorScore) { melhorScore = score; melhor = i; }
+  }
+  return melhorScore >= 2 ? melhor : 0;
+}
+
 export function limparNomeMedico(nome: unknown): string {
   const s = String(nome ?? '').trim();
   if (!s) return s;
