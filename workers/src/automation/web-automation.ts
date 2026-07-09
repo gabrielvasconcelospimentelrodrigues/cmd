@@ -512,10 +512,16 @@ export class WebAutomator {
       const btn = page.getByRole('button', { name: 'Buscar', exact: true }).first();
       if (await btn.count().catch(() => 0)) await btn.click({ timeout: 5000 }).catch(() => {});
       else await busca.press('Enter').catch(() => {});
-      await page.waitForTimeout(2500);
-      // Cada linha de resultado mostra o CNS na coluna CPF/CNS — conta as ocorrências.
-      const n = await page.getByText(cnsLimpo, { exact: true }).count().catch(() => 0);
-      console.log(`[DEDUP CMD] CNS ${cnsLimpo} -> ${n} contato(s) no CMD`);
+      await page.waitForTimeout(3500);
+      // Várias estratégias de contagem (a estrutura da tabela do CMD é incerta).
+      const exato = await page.getByText(cnsLimpo, { exact: true }).count().catch(() => 0);
+      const contendo = await page.getByText(cnsLimpo, { exact: false }).count().catch(() => 0);
+      const linhasTr = await page.locator(`tr:has-text("${cnsLimpo}")`).count().catch(() => 0);
+      const linhasDatatable = await page.locator(`datatable-body-row:has-text("${cnsLimpo}"), .datatable-body-row:has-text("${cnsLimpo}")`).count().catch(() => 0);
+      // DEBUG: amostra do que apareceu na tela após a busca.
+      const amostra = (await page.locator('datatable-body, table, ion-content, body').first().innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
+      console.log(`[DEDUP CMD] CNS ${cnsLimpo} exato=${exato} contendo=${contendo} tr=${linhasTr} datatable=${linhasDatatable} | tela: ${amostra}`);
+      const n = Math.max(linhasDatatable, linhasTr, exato);
       return n;
     } catch (e) {
       console.log(`[DEDUP CMD] falha ao pesquisar CNS ${cnsLimpo}: ${(e as Error).message.slice(0, 60)}`);
