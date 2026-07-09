@@ -305,13 +305,16 @@ export function startRegistrationWorker(): Worker<UploadJob> {
 
       if (execucao === 'locked') {
         // Conta CMD ocupada por OUTRA lista (ou job duplicado) — espera a vez.
-        // Sai de 'registering' p/ 'extracted' (watchdog ignora) e re-agenda com
-        // jobId fixo (dedupe do BullMQ) pra não empilhar.
+        // Sai de 'registering' p/ 'extracted' (watchdog ignora esse status como
+        // "rodando"). SEM jobId fixo: com jobId, um re-enqueue feito enquanto o
+        // job de espera ainda estava ativo era ENGOLIDO pelo BullMQ e a lista
+        // ficava órfã (nunca mais processada). Sem dedupe não empilha porque só
+        // 1 job de espera fira por vez (delay 30s) e o watchdog não mexe aqui.
         const st = await statusDoUpload(uploadId);
         if (st !== 'paused' && st !== 'parado') {
           await setUploadStatus(uploadId, 'extracted', { current_step: 'Na fila — aguardando a conta CMD liberar…' });
         }
-        await registrationQueue.add('registrar', { uploadId }, { delay: 30_000, jobId: `wait-conta-${uploadId}` });
+        await registrationQueue.add('registrar', { uploadId }, { delay: 30_000, removeOnComplete: true, removeOnFail: true });
         return;
       }
       if (execucao === 'done') {
