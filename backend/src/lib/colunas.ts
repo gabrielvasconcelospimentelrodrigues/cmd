@@ -31,8 +31,10 @@ const ALIASES: Record<CampoImportacao, string[]> = {
     'agendamento', 'agendamentos', 'data agendada', 'data do procedimento',
     'agendado em', 'data e horario do atendimento', 'data hora atendimento',
     'atendimento', 'data consulta', 'data da consulta',
-    'data de admissao', 'data do desfecho', 'data de realizacao',
-    'data de realizacao do procedimento',
+    'data de admissao', 'data da admissao', 'admissao',
+    'data do desfecho', 'data de desfecho',
+    'data de realizacao', 'data da realizacao',
+    'data de realizacao do procedimento', 'data da realizacao do procedimento',
   ],
   profissional: [
     'profissional executante', 'medico', 'médico', 'profissional',

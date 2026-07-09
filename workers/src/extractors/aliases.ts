@@ -20,8 +20,10 @@ export const ALIASES_COLUNA: Record<string, readonly string[]> = {
     'agendado em',
     'data e horario do atendimento', 'data hora atendimento',
     'atendimento', 'data consulta', 'data da consulta',
-    'data de admissao', 'data do desfecho', 'data de realizacao',
-    'data de realizacao do procedimento',
+    'data de admissao', 'data da admissao', 'admissao',
+    'data do desfecho', 'data de desfecho',
+    'data de realizacao', 'data da realizacao',
+    'data de realizacao do procedimento', 'data da realizacao do procedimento',
   ],
   cid10_codigo: ['cid-10', 'cid 10', 'cid10', 'cid', 'problema', 'diagnostico', 'problema/diagnostico'],
   modalidade: ['modalidade', 'tipo', 'tipo de cadastro', 'tipo cadastro', 'cirurgia', 'catarata', 'oci', 'tipo procedimento', 'tipo de procedimento', 'modalidade cadastro'],
@@ -88,7 +90,10 @@ export function parseData(valor: unknown): string | null {
   }
 
   let texto = String(valor).trim();
-  if (texto.includes(' ')) texto = texto.split(' ')[0] ?? texto; // tira horário
+  // tira horário — aceita "d/m/Y HH:MM" e ISO "Y-m-dTHH:MM:SS.sssZ" (o ExcelJS
+  // serializa datas do .xlsx/.xlsm como ISO com 'T', que quebrava o parse).
+  if (texto.includes('T')) texto = texto.split('T')[0] ?? texto;
+  if (texto.includes(' ')) texto = texto.split(' ')[0] ?? texto;
 
   // d/m/Y  ou  d-m-Y
   const dmy = texto.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);

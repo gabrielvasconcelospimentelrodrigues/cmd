@@ -45,14 +45,22 @@ async function lerArquivo(
   const idxCab = acharLinhaCabecalho(matriz);
   const cab = matriz[idxCab] ?? [];
   const dados = matriz.slice(idxCab + 1);
-  const colunas = (cab ?? []).map((c) => (c !== null && c !== undefined ? String(c) : ''));
+  // Trima os nomes de coluna — templates trazem lixo ("Nome Completo*\t",
+  // espaços à esquerda) que faria o mapa do usuário (já trimado no backend) não
+  // bater com a chave do dict e o campo vir vazio.
+  const colunas = (cab ?? []).map((c) => (c !== null && c !== undefined ? String(c).trim() : ''));
   const linhas = dados
     .filter((l) => l.some((c) => c !== null && c !== undefined && String(c).trim() !== ''))
     .map((l) => {
       const obj: Record<string, string> = {};
       colunas.forEach((col, i) => {
+        if (!col) return;
         const v = l[i];
-        obj[col] = v !== null && v !== undefined ? String(v) : '';
+        const val = v !== null && v !== undefined ? String(v).trim() : '';
+        // 1ª ocorrência NÃO-VAZIA vence: o template oficial repete colunas
+        // ("CNS do profissional*", "Data da realização*"…) — a 1ª é o
+        // procedimento real; as demais são blocos extras/linhas de exemplo.
+        if (!(col in obj) || (obj[col] === '' && val !== '')) obj[col] = val;
       });
       return obj;
     });
@@ -85,7 +93,7 @@ export async function importarComMapa(
 
   return linhas.map((linha) => {
     const get = (campo: CampoImportacao): string => {
-      const colOrigem = mapa[campo];
+      const colOrigem = mapa[campo]?.trim();
       const v = colOrigem ? linha[colOrigem] : '';
       return v !== null && v !== undefined ? String(v).trim() : '';
     };
@@ -102,5 +110,8 @@ export async function importarComMapa(
       data_atendimento: parseData(get('data_atendimento')),
       modalidade: get('modalidade'),
     };
-  });
+  })
+  // Descarta linhas-fantasma (sem identificador nem nome) — o template oficial
+  // gera linhas de "sobra" por células mescladas/quebra de linha.
+  .filter((r) => r.cns.trim() !== '' || r.nome.trim() !== '');
 }
