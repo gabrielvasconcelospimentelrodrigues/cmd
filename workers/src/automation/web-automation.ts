@@ -1062,10 +1062,13 @@ export class WebAutomator {
     T('finalização concluída → confirma volta à lista');
 
     // Confirma que voltou à lista (botão "Incluir contato assistencial" visível).
+    // 90s: em horário comercial o gov demora a processar o Salvar/Finalizar —
+    // 30s dava "falso-negativo" (marcava erro num cadastro que ia salvar).
     try {
-      await page.getByRole('button', { name: 'Incluir contato assistencial' }).first().waitFor({ state: 'visible', timeout: 30_000 });
+      await page.getByRole('button', { name: 'Incluir contato assistencial' }).first().waitFor({ state: 'visible', timeout: 90_000 });
       T('VOLTOU À LISTA — cadastro OK');
     } catch (e) {
+      await this.capturarDebug(`finalizar_falhou_${cns}`).catch(() => {});
       if (await page.getByRole('button', { name: 'Finalizar' }).isVisible({ timeout: 2000 }).catch(() => false)) {
         T('!! Finalizar ainda visível — NÃO registrou');
         throw e; // formulário ainda aberto → não registrado → retry seguro
