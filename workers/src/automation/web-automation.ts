@@ -764,20 +764,26 @@ export class WebAutomator {
   private async selecionarProfissional(medicoNome: string): Promise<void> {
     // Limpa o registro do conselho ("- CRM AM 10408") — o CMD busca só pelo nome.
     const nome = limparNomeMedico(medicoNome);
-    if (!nome) throw new ProfessionalNotFoundError('Nome do médico não foi extraído da ficha (carimbo ilegível ou ausente).');
+    if (!nome) throw new ProfessionalNotFoundError('Médico não informado na ficha (nome, CNS ou CPF do profissional).');
     const page = this.page!;
     const container = page.locator('app-procedimento').locator('ng-autocomplete[formcontrolname="profissional"]');
     const inputBox = container.locator('input');
     await inputBox.click();
-    // Digita da ESQUERDA para a direita (primeiros nomes), não o último sobrenome.
-    // Usa os 2 primeiros nomes para filtrar; a escolha final é pelo nome COMPLETO.
-    const partes = nome.split(/\s+/).filter(Boolean);
-    const termoBusca = partes.slice(0, 2).join(' ') || nome;
+
+    // O médico pode vir como NOME, CNS (15 díg.) ou CPF (11 díg.). Se for número
+    // (sem letras), busca pelo número — as opções do CMD mostram "CNS - NOME", e
+    // casamos pela opção que CONTÉM esse número. Se for nome, busca pelos
+    // primeiros nomes (esquerda→direita) e casa pelo nome mais parecido.
+    const digitos = nome.replace(/\D/g, '');
+    const ehNumero = !/[a-zA-Z]/.test(nome) && (digitos.length === 11 || digitos.length === 15);
+    const termoBusca = ehNumero ? digitos : (nome.split(/\s+/).filter(Boolean).slice(0, 2).join(' ') || nome);
     await inputBox.pressSequentially(termoBusca, { delay: 100 });
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(2500);
     const opcoes = await container.locator('.suggestions-container.is-visible li').allInnerTexts();
-    const match = findBestMatch(nome, opcoes);
-    if (!match) throw new ProfessionalNotFoundError(`Profissional '${nome}' não foi encontrado na lista do portal. Opções vistas: ${opcoes.join(' | ')}`);
+    const match = ehNumero
+      ? (opcoes.find((o) => o.replace(/\D/g, '').includes(digitos)) ?? null)
+      : findBestMatch(nome, opcoes);
+    if (!match) throw new ProfessionalNotFoundError(`Profissional '${nome}' não encontrado no portal. Opções vistas: ${opcoes.join(' | ')}`);
     await container.getByText(match, { exact: false }).first().click();
     await page.waitForTimeout(500);
   }
