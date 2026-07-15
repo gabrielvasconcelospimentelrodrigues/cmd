@@ -50,7 +50,7 @@ export async function verificarAcessoAutomacao(tenant: TenantAcesso): Promise<Ac
     return {
       liberado: false,
       motivo: 'implantacao_pendente',
-      mensagem: 'Automação bloqueada: a implantação ainda não foi paga.',
+      mensagem: 'Você não tem permissão para realizar automação: é necessário fazer a contratação (terminais + implantação).',
       valor_implantacao: valorImplantacao,
       valor_vencido: 0,
     };
@@ -69,7 +69,7 @@ export async function verificarAcessoAutomacao(tenant: TenantAcesso): Promise<Ac
     return {
       liberado: false,
       motivo: 'mensalidade_pendente',
-      mensagem: 'Automação bloqueada: nenhuma mensalidade paga.',
+      mensagem: 'Você não tem permissão para realizar automação: é necessário contratar os terminais e pagar a mensalidade.',
       valor_implantacao: valorImplantacao,
       valor_vencido: 0,
     };

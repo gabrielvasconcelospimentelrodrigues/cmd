@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { supabaseAdmin } from '../lib/supabase';
 import { extractionQueue, registrationQueue } from '../lib/queue';
 import { getRedis } from '../lib/redis';
@@ -71,7 +71,19 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
   // ---- Preview de COLUNAS do arquivo (para a tela de mapeamento manual) ------
   // Lê só os cabeçalhos e devolve as colunas + sugestão automática por aliases.
   // NÃO armazena nada — é só para montar o mapeamento antes de importar.
-  app.post('/uploads/colunas', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
+  /**
+   * Barra a PORTA DE ENTRADA da automação (ler colunas / subir lista) quando o
+   * pagamento não libera. Sem isto a lista sobe e é extraída normalmente — para
+   * o cliente parece que a automação rodou, e só o cadastro trava lá no fim.
+   */
+  const requireAutomacaoLiberada = async (req: FastifyRequest, reply: FastifyReply) => {
+    const acesso = await verificarAcessoAutomacao(req.tenant!);
+    if (!acesso.liberado) {
+      return reply.code(402).send({ error: acesso.mensagem, motivo: acesso.motivo, acesso_automacao: acesso });
+    }
+  };
+
+  app.post('/uploads/colunas', { preHandler: [app.authenticate, app.requireActive, requireAutomacaoLiberada] }, async (req, reply) => {
     const file = await req.file().catch(() => null);
     if (!file) return reply.code(400).send({ error: 'Arquivo ausente.' });
     const buffer = await file.toBuffer();
@@ -86,7 +98,7 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ---- Criar upload (arquivo tabular) → Storage → fila de extração ----------
-  app.post('/uploads', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
+  app.post('/uploads', { preHandler: [app.authenticate, app.requireActive, requireAutomacaoLiberada] }, async (req, reply) => {
     const tenantId = req.tenant!.id;
     let fileBuffer: Buffer | null = null;
     let filename = '';

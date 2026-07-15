@@ -278,7 +278,7 @@ export default function Painel() {
             />
           </div>
           <div style={{ display: page === 'enviar' ? 'block' : 'none' }}>
-            <Enviar empresas={empresas} uploads={uploadsView} contas={contas} isMember={isMember} onChange={carregar} showToast={showToast} />
+            <Enviar empresas={empresas} uploads={uploadsView} contas={contas} isMember={isMember} bloqueado={!!acesso && !acesso.liberado} onBloqueado={() => setAvisoAberto(true)} onChange={carregar} showToast={showToast} />
           </div>
           <div style={{ display: page === 'pendencias' ? 'block' : 'none' }}>
             <Pendencias patients={patientsView} uploads={uploadsView} onChange={carregar} showToast={showToast} />
@@ -328,8 +328,8 @@ function AvisoTesteEncerrado({ acesso, cadastradas, isMember, onVerPlano, onClos
   const chamada = inadimplente
     ? `Há ${brl(acesso.valor_vencido)} em fatura(s) vencida(s). Assim que o pagamento for confirmado, o robô volta a cadastrar.`
     : cadastradas > 0
-      ? 'Esse trabalho foi feito sozinho, enquanto sua equipe cuidava do resto. Para o robô voltar a cadastrar, é necessário ativar a assinatura.'
-      : 'Para liberar o robô e começar a cadastrar automaticamente, é necessário ativar a assinatura.';
+      ? 'Esse trabalho foi feito sozinho, enquanto sua equipe cuidava do resto. Para o robô voltar a cadastrar, é necessário fazer a contratação dos terminais e ativar a assinatura.'
+      : 'Para liberar o robô e cadastrar automaticamente, é necessário fazer a contratação dos terminais e ativar a assinatura.';
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 95, background: 'rgba(7,11,22,.72)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }}>
       <div onClick={(e) => e.stopPropagation()} className="ia-card" style={{ width: 520, maxWidth: '100%', padding: 30, animation: 'ia-slide .22s ease' }}>
@@ -661,7 +661,7 @@ function MapeamentoModal({ colunas, obrigatorios, mapa, setMapa, busy, onCancel,
 }
 
 /* ============ ENVIAR FICHA ============ */
-function Enviar({ empresas, uploads, contas = [], isMember, onChange, showToast }: { empresas: any[]; uploads: Upload[]; contas?: ClinicAccount[]; isMember: boolean; onChange: () => Promise<void>; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void }) {
+function Enviar({ empresas, uploads, contas = [], isMember, bloqueado = false, onBloqueado, onChange, showToast }: { empresas: any[]; uploads: Upload[]; contas?: ClinicAccount[]; isMember: boolean; bloqueado?: boolean; onBloqueado?: () => void; onChange: () => Promise<void>; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void }) {
   const [empresaId, setEmpresaId] = useState<number | ''>('');
   const [nomeLista, setNomeLista] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -674,6 +674,9 @@ function Enviar({ empresas, uploads, contas = [], isMember, onChange, showToast 
 
   // 1º passo: lê os cabeçalhos do arquivo e abre a tela de mapeamento.
   const abrirMapeamento = async () => {
+    // Sem contratação não passa nem da porta: nem carregar a lista. (O backend
+    // barra de novo — isto é só para avisar antes de gastar o clique.)
+    if (bloqueado) return onBloqueado?.();
     if (!empresaId || !file) return showToast({ title: 'Faltam dados', msg: 'Escolha a empresa e o arquivo.', kind: 'err' });
     setBusy(true);
     try {
@@ -724,7 +727,13 @@ function Enviar({ empresas, uploads, contas = [], isMember, onChange, showToast 
       <Card style={{ padding: 24 }}>
         <div style={{ color: 'var(--c-ink)', fontSize: 16, fontWeight: 700 }}>Importar planilha (CSV / Excel / XML)</div>
         <div style={{ color: 'var(--c-ink3)', fontSize: 13, marginTop: 4 }}>Envie a planilha e <b>confira o mapeamento das colunas</b> antes de importar — evita erro por cabeçalho fora do padrão.</div>
-        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 18 }}>
+        {bloqueado && (
+          <div onClick={() => onBloqueado?.()} style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 14, padding: '11px 14px', borderRadius: 10, background: 'var(--c-warnsoft)', border: '1px solid var(--c-warn)', color: 'var(--c-warnfg)', fontSize: 13, cursor: 'pointer' }}>
+            <AlertTriangle size={16} style={{ flex: 'none' }} />
+            <span><b>Importação bloqueada.</b> Você não tem permissão para realizar automação — é necessário fazer a contratação dos terminais e ativar a assinatura.</span>
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 18, opacity: bloqueado ? 0.5 : 1 }}>
           <div style={{ flex: 1, minWidth: 200 }}>
             <label className="ia-label">Nome da lista</label>
             <input type="text" value={nomeLista} onChange={(e) => setNomeLista(e.target.value)} className="ia-input" placeholder="Ex: Fichas Oftalmo Junho" />
