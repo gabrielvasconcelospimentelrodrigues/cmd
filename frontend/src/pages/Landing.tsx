@@ -5,6 +5,7 @@ import {
   AlertTriangle, Lock, Plus, Minus, X,
 } from 'lucide-react';
 import { useTheme, LogoMark, useToast, Toast, Field } from '../components/iacmd/ui';
+import WhatsAppFab from '../components/iacmd/WhatsAppFab';
 import { AgentSphere } from '../components/iacmd/AgentSphere';
 
 const NAV = [
@@ -179,6 +180,7 @@ export default function Landing() {
 
       {demo && <DemoModal onClose={() => setDemo(false)} onSent={() => { setDemo(false); showToast({ title: 'Pedido enviado', msg: 'Entramos em contato em até 1 dia útil.', kind: 'ok' }); }} />}
       {menu && null}
+      <WhatsAppFab />
       <Toast data={toast} />
     </div>
   );

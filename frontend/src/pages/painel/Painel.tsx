@@ -8,6 +8,7 @@ import {
 import { useAuth } from '../../auth/AuthProvider';
 import { useTheme, LogoMark, useToast, Toast } from '../../components/iacmd/ui';
 import ProfileSecurity from '../../components/iacmd/ProfileSecurity';
+import WhatsAppFab from '../../components/iacmd/WhatsAppFab';
 import { AgentSphere } from '../../components/iacmd/AgentSphere';
 import { apiGet, apiPost, apiUpload, apiDelete, apiPatch, EVENTO_BLOQUEIO } from '../../lib/api';
 import type { Upload, Ficha, ClinicAccount, Me, LogEntry, EconomiaResp, AcessoAutomacao } from '../../lib/types';
@@ -310,6 +311,7 @@ export default function Painel() {
           onClose={() => setAvisoAberto(false)}
         />
       )}
+      <WhatsAppFab />
       <Toast data={toast} />
     </div>
   );
