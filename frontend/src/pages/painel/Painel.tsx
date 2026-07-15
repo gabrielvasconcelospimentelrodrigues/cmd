@@ -186,7 +186,31 @@ export default function Painel() {
       </aside>
 
       <main style={{ minWidth: 0, overflowY: 'auto' }}>
-        <div style={{ position: 'sticky', top: 0, zIndex: 30, minHeight: 68, background: 'var(--c-surface)', borderBottom: '1px solid var(--c-border)', display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px' }}>
+        {/* Barra + header num ÚNICO sticky: dois sticky com top:0 se sobrepõem
+            ao rolar (a barra cobriria o header). Assim eles empilham. */}
+        <div style={{ position: 'sticky', top: 0, zIndex: 30 }}>
+        {/* Barra de automação bloqueada — SEMPRE visível (o modal aparece 1x
+            por sessão; esta barra é o lembrete permanente). */}
+        {acesso && !acesso.liberado && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '10px 16px', background: 'var(--c-warnsoft)', borderBottom: '1px solid var(--c-warn)', color: 'var(--c-warnfg)' }}>
+            <AlertTriangle size={16} style={{ flex: 'none' }} />
+            <span style={{ fontSize: 13.5, fontWeight: 700 }}>
+              {acesso.motivo === 'inadimplente' ? 'Automação bloqueada' : 'Período de teste vencido'}
+            </span>
+            <span style={{ fontSize: 13, opacity: 0.9 }}>
+              {acesso.motivo === 'inadimplente'
+                ? `Há ${brl(acesso.valor_vencido)} em fatura(s) vencida(s). O robô não vai cadastrar até a regularização.`
+                : 'O robô não vai cadastrar até a assinatura ser ativada. Seu acesso e seus dados continuam aqui.'}
+            </span>
+            <button
+              onClick={() => (isMember ? setAvisoAberto(true) : setPage('planos'))}
+              style={{ marginLeft: 'auto', flex: 'none', border: 'none', borderRadius: 8, padding: '7px 14px', background: 'var(--c-warn)', color: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+            >
+              {isMember ? 'Saiba mais' : 'Ativar assinatura'}
+            </button>
+          </div>
+        )}
+        <div style={{ minHeight: 68, background: 'var(--c-surface)', borderBottom: '1px solid var(--c-border)', display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px' }}>
           <button className="ia-hamburger" onClick={() => setMenuOpen(true)} title="Menu" style={{ width: 38, height: 38, flex: 'none', borderRadius: 10, border: '1px solid var(--c-border)', background: 'transparent', color: 'var(--c-ink)', cursor: 'pointer', placeItems: 'center' }}><Menu size={18} /></button>
           <div style={{ minWidth: 0 }}>
             <h1 style={{ color: 'var(--c-ink)', fontSize: 20, fontWeight: 700, letterSpacing: '-.01em', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{TITLE[page]}</h1>
@@ -236,6 +260,7 @@ export default function Painel() {
             <button onClick={toggleTheme} title="Alternar tema" style={{ width: 38, height: 38, borderRadius: 10, border: '1px solid var(--c-border)', background: 'transparent', color: 'var(--c-ink)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}>{theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}</button>
             <button onClick={() => setPerfilAberto(true)} title="Perfil e segurança" style={{ width: 38, height: 38, borderRadius: '50%', border: 'none', background: 'linear-gradient(135deg,#2563EB,#38BDF8)', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'grid', placeItems: 'center' }}>{initials((session?.user?.user_metadata as { full_name?: string } | undefined)?.full_name || tenant?.name || 'U')}</button>
           </div>
+        </div>
         </div>
         <div className="ia-main-pad" style={{ maxWidth: page === 'painel' && runningUploads.length > 0 ? '100%' : 1180, margin: '0 auto', padding: 28, animation: 'ia-slide .25s ease' }}>
           <div style={{ display: page === 'painel' ? 'block' : 'none' }}>
