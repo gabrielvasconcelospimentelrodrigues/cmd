@@ -6,6 +6,7 @@ import {
   logEntry, setUploadStatus, getUploadComConta, listarPendentes, marcarPaciente, atualizarContadores, statusDoUpload, registrarExecucao, contarStatus, acrescentarTempoAtivo, jaCadastrado, marcarDuplicados, reenfileirarErros,
 } from '../lib/repo';
 import { proximaJanelaPermitida } from '../scheduling';
+import { verificarAcessoAutomacao } from '../lib/acesso';
 import { withLock } from '../lib/lock';
 import { decrypt } from '../lib/crypto';
 import { WebAutomator, ProfessionalNotFoundError, LoginAbortadoError, type PatientData } from '../automation/web-automation';
@@ -66,6 +67,17 @@ export function startRegistrationWorker(): Worker<UploadJob> {
       if (!conta.is_enabled) {
         await setUploadStatus(uploadId, 'paused');
         await logEntry(uploadId, 'WARN', 'Automação desligada nesta conta — ligue em Configurações para iniciar.');
+        return;
+      }
+
+      // GATE DE PAGAMENTO: acabou o período de teste — sem pagamento, não roda.
+      // Precisa estar AQUI, e não só na rota /iniciar: a extração agenda o
+      // registro sozinha após o upload, então sem isto bastaria subir uma
+      // planilha para burlar o bloqueio.
+      const acesso = await verificarAcessoAutomacao(conta.tenant_id);
+      if (!acesso.liberado) {
+        await setUploadStatus(uploadId, 'paused', { current_step: 'Pagamento pendente' });
+        await logEntry(uploadId, 'WARN', acesso.mensagem);
         return;
       }
 

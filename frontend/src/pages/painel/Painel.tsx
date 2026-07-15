@@ -9,8 +9,8 @@ import { useAuth } from '../../auth/AuthProvider';
 import { useTheme, LogoMark, useToast, Toast } from '../../components/iacmd/ui';
 import ProfileSecurity from '../../components/iacmd/ProfileSecurity';
 import { AgentSphere } from '../../components/iacmd/AgentSphere';
-import { apiGet, apiPost, apiUpload, apiDelete, apiPatch } from '../../lib/api';
-import type { Upload, Ficha, ClinicAccount, Me, LogEntry, EconomiaResp } from '../../lib/types';
+import { apiGet, apiPost, apiUpload, apiDelete, apiPatch, EVENTO_BLOQUEIO } from '../../lib/api';
+import type { Upload, Ficha, ClinicAccount, Me, LogEntry, EconomiaResp, AcessoAutomacao } from '../../lib/types';
 import { StatusPill, Card, ProgressBar, fmtMilhar, brl, economia, fichaTone, toneLabel } from './parts';
 import Pendencias from './Pendencias';
 import Config from './Config';
@@ -66,6 +66,10 @@ export default function Painel() {
   const [patients, setPatients] = useState<Ficha[]>([]);
   const [contas, setContas] = useState<ClinicAccount[]>([]);
   const [empresas, setEmpresas] = useState<any[]>([]);
+  // Fim do período de teste: o login segue livre, a automação é que depende do
+  // pagamento. Guardamos o motivo p/ o aviso e p/ desabilitar os botões.
+  const [acesso, setAcesso] = useState<AcessoAutomacao | null>(null);
+  const [avisoAberto, setAvisoAberto] = useState(false);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -84,8 +88,27 @@ export default function Painel() {
       apiGet<any[]>('/empresas').catch(() => [])
     ]);
     setTenant(me.tenant); setIsMember(!!me.member); setUploads(u); setPatients(p); setContas(c); setEmpresas(e);
+    setAcesso(me.acesso_automacao ?? null);
   }, []);
   useEffect(() => { void carregar(); }, [carregar]);
+  // Abre o aviso 1x por sessão (o /me roda a cada 6s — sem isto o modal
+  // reabriria sozinho e viraria uma armadilha na tela).
+  useEffect(() => {
+    if (!acesso || acesso.liberado) return;
+    if (sessionStorage.getItem('cmd_aviso_pagamento') === '1') return;
+    sessionStorage.setItem('cmd_aviso_pagamento', '1');
+    setAvisoAberto(true);
+  }, [acesso]);
+  // Qualquer ação bloqueada (402), de qualquer tela, reabre o aviso.
+  useEffect(() => {
+    const abrir = (e: Event) => {
+      const det = (e as CustomEvent).detail as AcessoAutomacao | null;
+      if (det) setAcesso(det);
+      setAvisoAberto(true);
+    };
+    window.addEventListener(EVENTO_BLOQUEIO, abrir);
+    return () => window.removeEventListener(EVENTO_BLOQUEIO, abrir);
+  }, []);
   // 6s (era 2s): reduz MUITO o egress do Supabase (a cada ciclo busca uploads +
   // TODOS os patients + contas + empresas). 6s é responsivo o bastante.
   useEffect(() => { const t = setInterval(() => void carregar().catch(() => {}), 6000); return () => clearInterval(t); }, [carregar]);
@@ -253,7 +276,77 @@ export default function Painel() {
       </main>
       {perfilAberto && <ProfileSecurity onClose={() => setPerfilAberto(false)} showToast={showToast} papelLabel="Assinante" />}
       {liveSidebarUpload && <RoboAoVivoModal upload={liveSidebarUpload} onClose={() => setLiveSidebarUpload(null)} />}
+      {avisoAberto && acesso && !acesso.liberado && (
+        <AvisoTesteEncerrado
+          acesso={acesso}
+          cadastradas={patients.filter((p) => OK.includes(p.status)).length}
+          isMember={isMember}
+          onVerPlano={() => { setAvisoAberto(false); setPage('planos'); }}
+          onClose={() => setAvisoAberto(false)}
+        />
+      )}
       <Toast data={toast} />
+    </div>
+  );
+}
+
+/* ============ AVISO: fim do período de teste ============
+ * O acesso ao painel continua livre — o que parou é a automação. O aviso
+ * relembra o valor já entregue (fichas realmente cadastradas) antes de pedir a
+ * ativação, e deixa claro que nada foi perdido. */
+function AvisoTesteEncerrado({ acesso, cadastradas, isMember, onVerPlano, onClose }: { acesso: AcessoAutomacao; cadastradas: number; isMember: boolean; onVerPlano: () => void; onClose: () => void }) {
+  // ~4 min por ficha na mão (base usada no módulo de Economia).
+  const horas = Math.round((cadastradas * 4) / 60);
+  // Quem já é pagante e só está com fatura vencida NÃO pode ver "fim do teste".
+  const inadimplente = acesso.motivo === 'inadimplente';
+  const titulo = inadimplente ? 'Sua automação está bloqueada' : 'Seu período de teste chegou ao fim';
+  const chamada = inadimplente
+    ? `Há ${brl(acesso.valor_vencido)} em fatura(s) vencida(s). Assim que o pagamento for confirmado, o robô volta a cadastrar.`
+    : cadastradas > 0
+      ? 'Esse trabalho foi feito sozinho, enquanto sua equipe cuidava do resto. Para o robô voltar a cadastrar, é necessário ativar a assinatura.'
+      : 'Para liberar o robô e começar a cadastrar automaticamente, é necessário ativar a assinatura.';
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 95, background: 'rgba(7,11,22,.72)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} className="ia-card" style={{ width: 520, maxWidth: '100%', padding: 30, animation: 'ia-slide .22s ease' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
+          <div style={{ width: 46, height: 46, borderRadius: 12, background: 'var(--c-warnsoft)', color: 'var(--c-warn)', display: 'grid', placeItems: 'center', flexShrink: 0 }}><AlertTriangle size={22} /></div>
+          <div>
+            <h3 style={{ color: 'var(--c-ink)', fontSize: 21, fontWeight: 700, margin: 0 }}>{titulo}</h3>
+            <div style={{ color: 'var(--c-ink3)', fontSize: 13, marginTop: 2 }}>A automação está pausada — seu acesso continua liberado.</div>
+          </div>
+        </div>
+
+        {cadastradas > 0 && (
+          <div style={{ marginTop: 20, padding: 16, borderRadius: 12, background: 'var(--c-surface2)', border: '1px solid var(--c-border)' }}>
+            <div style={{ color: 'var(--c-ink3)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em' }}>O que o robô já fez por você</div>
+            <div style={{ display: 'flex', gap: 26, marginTop: 10 }}>
+              <div>
+                <div style={{ color: 'var(--c-okfg)', fontSize: 26, fontWeight: 700, lineHeight: 1.1 }}>{fmtMilhar(cadastradas)}</div>
+                <div style={{ color: 'var(--c-ink2)', fontSize: 12 }}>fichas cadastradas no CMD</div>
+              </div>
+              {horas > 0 && (
+                <div>
+                  <div style={{ color: 'var(--c-ink)', fontSize: 26, fontWeight: 700, lineHeight: 1.1 }}>~{fmtMilhar(horas)}h</div>
+                  <div style={{ color: 'var(--c-ink2)', fontSize: 12 }}>de digitação poupadas</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <p style={{ color: 'var(--c-ink2)', fontSize: 14, lineHeight: 1.65, margin: '18px 0 0' }}>{chamada}</p>
+        <p style={{ color: 'var(--c-ink3)', fontSize: 13, lineHeight: 1.6, margin: '10px 0 0' }}>
+          Nada foi perdido: suas listas, fichas e relatórios continuam aqui. Assim que o pagamento for confirmado, a automação volta exatamente de onde parou.
+        </p>
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
+          <button onClick={onClose} className="ia-btn-outline" style={{ flex: 1 }}>Agora não</button>
+          {!isMember && <button onClick={onVerPlano} className="ia-btn" style={{ flex: 1.4, padding: 12 }}>Ativar minha assinatura</button>}
+        </div>
+        {isMember && (
+          <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 12, textAlign: 'center' }}>Fale com o titular da conta para ativar a assinatura.</div>
+        )}
+      </div>
     </div>
   );
 }

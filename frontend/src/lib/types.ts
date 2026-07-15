@@ -32,6 +32,17 @@ export interface Me {
   tenant: Tenant;
   // Preenchido quando o usuário logado é MEMBRO de equipe (não o titular).
   member: TenantMember | null;
+  // Login é livre; a AUTOMAÇÃO depende do pagamento. Null = não avaliado.
+  acesso_automacao?: AcessoAutomacao | null;
+}
+
+/** Por que a automação está bloqueada (o painel usa para abrir o aviso). */
+export interface AcessoAutomacao {
+  liberado: boolean;
+  motivo: 'implantacao_pendente' | 'mensalidade_pendente' | 'inadimplente' | null;
+  mensagem: string;
+  valor_implantacao: number;
+  valor_vencido: number;
 }
 
 export interface TenantMember {

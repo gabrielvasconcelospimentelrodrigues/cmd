@@ -5,6 +5,7 @@ import { getRedis } from '../lib/redis';
 import { gerarShortCode } from '../lib/shortcode';
 import { registrarLog, ator, atorNome } from '../lib/audit';
 import { analisarColunas, CAMPOS_OBRIGATORIOS } from '../lib/colunas';
+import { verificarAcessoAutomacao } from '../lib/acesso';
 import type { Database, UploadOrigem } from '../types/database';
 
 const BUCKET = 'uploads';
@@ -559,13 +560,12 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     } else {
       // iniciar/retomar: limpa as flags de pausa/parada para poder rodar.
       await getRedis().del(`ctrl:pause:${id}`, `ctrl:stop:${id}`).catch(() => {});
-      // GATE DE PAGAMENTO: só usa os terminais se os custos estão em dia.
-      // Bloqueia se houver fatura VENCIDA em aberto.
-      const hojeStr = new Date().toISOString().slice(0, 10);
-      const { data: vencidas } = await (supabaseAdmin as any)
-        .from('faturas').select('id').eq('tenant_id', req.tenant!.id).eq('status', 'aberto').lt('vencimento', hojeStr).limit(1);
-      if (vencidas && vencidas.length > 0) {
-        return reply.code(402).send({ error: 'Automação bloqueada: há fatura(s) vencida(s) em aberto. Regularize o pagamento para usar os terminais.' });
+      // GATE DE PAGAMENTO: o período de teste acabou — quem libera a automação
+      // é o pagamento (implantação + mensalidade em dia). O 'motivo' vai junto
+      // para o painel abrir o modal certo.
+      const acesso = await verificarAcessoAutomacao(req.tenant!);
+      if (!acesso.liberado) {
+        return reply.code(402).send({ error: acesso.mensagem, motivo: acesso.motivo, acesso_automacao: acesso });
       }
 
       // iniciar / retomar. Recebe o SLOT do terminal (1..N) escolhido. Os

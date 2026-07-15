@@ -24,15 +24,26 @@ async function authHeader(): Promise<Record<string, string>> {
 }
 
 let redirecionando = false;
+/** Evento global de "automação bloqueada por pagamento" (402). O painel escuta
+ * e abre o aviso de fim do teste — assim qualquer ação bloqueada, de qualquer
+ * tela, cai no MESMO aviso, sem passar props por vários níveis. */
+export const EVENTO_BLOQUEIO = 'cmd:automacao-bloqueada';
+
 async function toError(res: Response): Promise<ApiError> {
   let msg = res.statusText;
   let code: string | undefined;
+  let corpo: Record<string, unknown> | undefined;
   try {
     const j = await res.json();
+    corpo = j;
     msg = j.error ?? msg;
     code = j.code;
   } catch {
     /* corpo não-JSON */
+  }
+  // 402 = pagamento necessário: a automação está bloqueada.
+  if (res.status === 402 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(EVENTO_BLOQUEIO, { detail: corpo?.acesso_automacao ?? null }));
   }
   // 401 = sessão morta (token inválido/expirado e sem refresh possível).
   // Desloga e manda pro login, em vez de deixar a tela de erro travada.

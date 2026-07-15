@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { supabaseAdmin } from '../lib/supabase';
 import { encrypt } from '../lib/crypto';
 import { registrarLog, ator, atorNome } from '../lib/audit';
+import { verificarAcessoAutomacao } from '../lib/acesso';
 import type { Database } from '../types/database';
 
 // Colunas seguras de clinic_accounts devolvidas ao cliente (sem cifras).
@@ -29,7 +30,10 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
   // Quem sou eu + minha clínica.
   app.get('/me', { preHandler: app.authenticate }, async (req) => {
     // member != null → é membro de equipe (acesso restrito ao próprio terminal).
-    return { user: req.authUser, tenant: req.tenant, member: req.member };
+    // acesso_automacao: o login é livre, mas a automação depende do pagamento —
+    // o painel usa isto para exibir o aviso de fim do período de teste.
+    const acesso = req.tenant ? await verificarAcessoAutomacao(req.tenant) : null;
+    return { user: req.authUser, tenant: req.tenant, member: req.member, acesso_automacao: acesso };
   });
 
   // Contas CMD-COLETA da clínica (sem expor senha/MFA cifrados).
