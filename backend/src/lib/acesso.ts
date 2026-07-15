@@ -24,6 +24,16 @@ export interface AcessoAutomacao {
 
 const LIBERADO: AcessoAutomacao = { liberado: true, motivo: null, mensagem: '', valor_implantacao: 0, valor_vencido: 0 };
 
+/**
+ * Faturas que comprovam pagamento do USO DOS TERMINAIS. São os dois únicos
+ * tipos que o sistema emite:
+ *  - 'mensalidade': o ciclo mensal cheio;
+ *  - 'terminal_proporcional': quem contrata no MEIO do mês paga o pró-rata, e a
+ *    1ª mensalidade cheia só vem no ciclo seguinte. Sem este tipo aqui, um
+ *    cliente que contratou e pagou certinho ficaria bloqueado até virar o mês.
+ */
+const TIPOS_USO_TERMINAL = ['mensalidade', 'terminal_proporcional'];
+
 /** Tenant já carregado (o authenticate faz select('*')) — evita re-buscar. */
 export interface TenantAcesso {
   id: number;
@@ -56,12 +66,13 @@ export async function verificarAcessoAutomacao(tenant: TenantAcesso): Promise<Ac
     };
   }
 
-  // 2) Mensalidade: precisa de ao menos uma fatura de mensalidade PAGA.
+  // 2) Uso dos terminais: precisa de ao menos UMA fatura paga (mensalidade ou
+  // a proporcional de quem contratou no meio do mês).
   const { data: pagas } = await (supabaseAdmin as any)
     .from('faturas')
     .select('id')
     .eq('tenant_id', tenant.id)
-    .eq('tipo', 'mensalidade')
+    .in('tipo', TIPOS_USO_TERMINAL)
     .eq('status', 'pago')
     .limit(1);
 

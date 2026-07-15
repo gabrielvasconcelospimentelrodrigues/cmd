@@ -33,11 +33,14 @@ export async function verificarAcessoAutomacao(tenantId: number): Promise<Acesso
     };
   }
 
+  // Comprova pagamento do uso dos terminais. 'terminal_proporcional' conta:
+  // quem contrata no MEIO do mês paga o pró-rata e só recebe a 1ª mensalidade
+  // cheia no ciclo seguinte — sem isso ficaria bloqueado mesmo pagando certo.
   const { data: pagas } = await (supabaseAdmin as any)
     .from('faturas')
     .select('id')
     .eq('tenant_id', tenantId)
-    .eq('tipo', 'mensalidade')
+    .in('tipo', ['mensalidade', 'terminal_proporcional'])
     .eq('status', 'pago')
     .limit(1);
 
