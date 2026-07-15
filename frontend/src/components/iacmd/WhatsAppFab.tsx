@@ -1,8 +1,7 @@
 /**
  * Botão flutuante de WhatsApp (canto inferior direito).
- * Abre em nova aba já com a mensagem preenchida.
- *
- * Não é usado no SuperAdmin de propósito: o contato é o próprio dono do painel.
+ * Abre em nova aba já com a mensagem preenchida. Usado na Landing, no Painel
+ * e no SuperAdmin.
  */
 
 // 55 = Brasil, 61 = DDD. O wa.me exige o número internacional completo, sem '+'.

@@ -6,6 +6,7 @@ import {
 import { useAuth } from '../auth/AuthProvider';
 import { useTheme, LogoMark, useToast, Toast, PasswordField, type ToastData } from '../components/iacmd/ui';
 import ProfileSecurity from '../components/iacmd/ProfileSecurity';
+import WhatsAppFab from '../components/iacmd/WhatsAppFab';
 import { apiGet, apiPost, apiPatch, apiDelete, apiPut } from '../lib/api';
 import { Switch, brl } from './painel/parts';
 import type { Plano, TerminalRequest, Fatura } from '../lib/types';
@@ -182,6 +183,7 @@ export default function SuperAdmin() {
         </div>
       )}
       {perfilAberto && <ProfileSecurity onClose={() => setPerfilAberto(false)} showToast={showToast} papelLabel="Super admin" />}
+      <WhatsAppFab />
       <Toast data={toast} />
     </div>
   );
