@@ -9,7 +9,7 @@ import { proximaJanelaPermitida } from '../scheduling';
 import { verificarAcessoAutomacao } from '../lib/acesso';
 import { withLock } from '../lib/lock';
 import { decrypt } from '../lib/crypto';
-import { WebAutomator, ProfessionalNotFoundError, LoginAbortadoError, type PatientData } from '../automation/web-automation';
+import { WebAutomator, ProfessionalNotFoundError, LoginAbortadoError, calcularIdade, type PatientData } from '../automation/web-automation';
 import { getMotorConfig, MOTOR_CONFIG_PADRAO } from '../lib/motor-config';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -247,7 +247,15 @@ export function startRegistrationWorker(): Worker<UploadJob> {
                 r = { ok: false, erro: `Cadastro travou: ${(e as Error).message}` };
               }
               if (r.ok) {
-                await marcarPaciente(p.id, 'registered');
+                // A automação preenche pd.dataNascimento com a data do CADSUS
+                // (a planilha quase nunca traz). É a ÚNICA chance de guardar a
+                // idade — depois daqui o dado se perde. Alimenta o analítico
+                // por faixa etária (0-8 x 9+) na tela de Fichas.
+                const idade = calcularIdade(pd.dataNascimento, pd.dataAtendimento);
+                await marcarPaciente(p.id, 'registered', '', {
+                  data_nascimento: pd.dataNascimento ? pd.dataNascimento.toISOString().slice(0, 10) : null,
+                  idade_no_atendimento: idade,
+                });
                 await registrarExecucao({ tenantId: conta.tenant_id, empresaId: conta.empresa_id, clinicAccountId: conta.id, uploadId, patientId: p.id });
                 registered++;
                 await logEntry(uploadId, 'INFO', `✓ ${p.nome || p.cns} cadastrado no CMD-COLETA.`);

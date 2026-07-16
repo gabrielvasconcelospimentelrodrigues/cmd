@@ -11,7 +11,7 @@ import ProfileSecurity from '../../components/iacmd/ProfileSecurity';
 import WhatsAppFab from '../../components/iacmd/WhatsAppFab';
 import { AgentSphere } from '../../components/iacmd/AgentSphere';
 import { apiGet, apiPost, apiUpload, apiDelete, apiPatch, EVENTO_BLOQUEIO } from '../../lib/api';
-import type { Upload, Ficha, ClinicAccount, Me, LogEntry, EconomiaResp, AcessoAutomacao } from '../../lib/types';
+import type { Upload, Ficha, ClinicAccount, Me, LogEntry, EconomiaResp, AcessoAutomacao, FichasAnalitico } from '../../lib/types';
 import { StatusPill, Card, ProgressBar, fmtMilhar, brl, economia, fichaTone, toneLabel } from './parts';
 import Pendencias from './Pendencias';
 import Config from './Config';
@@ -279,7 +279,7 @@ export default function Painel() {
             />
           </div>
           <div style={{ display: page === 'enviar' ? 'block' : 'none' }}>
-            <Enviar empresas={empresas} uploads={uploadsView} contas={contas} isMember={isMember} bloqueado={!!acesso && !acesso.liberado} onBloqueado={() => setAvisoAberto(true)} onChange={carregar} showToast={showToast} />
+            <Enviar empresas={empresas} uploads={uploadsView} contas={contas} isMember={isMember} filtroMembro={filtroMembro} filtroEmpresa={filtroEmpresa} ativo={page === 'enviar'} bloqueado={!!acesso && !acesso.liberado} onBloqueado={() => setAvisoAberto(true)} onChange={carregar} showToast={showToast} />
           </div>
           <div style={{ display: page === 'pendencias' ? 'block' : 'none' }}>
             <Pendencias patients={patientsView} uploads={uploadsView} onChange={carregar} showToast={showToast} />
@@ -313,6 +313,55 @@ export default function Painel() {
       )}
       <WhatsAppFab />
       <Toast data={toast} />
+    </div>
+  );
+}
+
+/* ============ ANALÍTICO da tela de Fichas ============
+ * O que já foi ENVIADO ao CMD, por modalidade e faixa etária.
+ *
+ * A faixa etária só existe para cadastros feitos depois que passamos a gravar a
+ * idade (quem informa é o CADSUS, durante a automação — a planilha quase nunca
+ * traz a data de nascimento). Os anteriores entram em "sem idade registrada", e
+ * mostramos isso na cara: esconder faria o recorte não fechar com o total. */
+function AnaliticoFichas({ a }: { a: FichasAnalitico }) {
+  const temIdade = a.faixa_0_8 + a.faixa_9_mais > 0;
+  const pct = (n: number) => (a.total > 0 ? Math.round((n / a.total) * 100) : 0);
+  return (
+    <Card style={{ padding: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ color: 'var(--c-ink)', fontSize: 16, fontWeight: 700 }}>Enviado ao CMD-COLETA</div>
+        <div style={{ color: 'var(--c-ink3)', fontSize: 13 }}>{fmtMilhar(a.total)} ficha(s) cadastrada(s)</div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 12, marginTop: 16 }}>
+        <Metrica rotulo="OCI" valor={a.oci} sub={`${pct(a.oci)}% do total`} cor="var(--c-cyan)" />
+        <Metrica rotulo="Cirurgia (catarata)" valor={a.cirurgia} sub={`${pct(a.cirurgia)}% do total`} cor="#A855F7" />
+        <Metrica rotulo="0 a 8 anos" valor={a.faixa_0_8} sub={temIdade ? `${pct(a.faixa_0_8)}% do total` : 'aguardando dados'} cor="var(--c-ok)" esmaecido={!temIdade} />
+        <Metrica rotulo="9 anos ou mais" valor={a.faixa_9_mais} sub={temIdade ? `${pct(a.faixa_9_mais)}% do total` : 'aguardando dados'} cor="var(--c-blue)" esmaecido={!temIdade} />
+      </div>
+
+      {a.sem_idade > 0 && (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, marginTop: 14, padding: '11px 14px', borderRadius: 10, background: 'var(--c-surface2)', border: '1px solid var(--c-border)', color: 'var(--c-ink3)', fontSize: 12.5, lineHeight: 1.55 }}>
+          <AlertTriangle size={15} style={{ flex: 'none', marginTop: 1 }} />
+          <span>
+            <b>{fmtMilhar(a.sem_idade)} ficha(s) sem idade registrada.</b> A idade vem do CADSUS durante o cadastro e só passou a ser guardada agora — por isso os cadastros anteriores não entram na divisão por faixa etária. Os novos entram automaticamente.
+          </span>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function Metrica({ rotulo, valor, sub, cor, esmaecido = false }: { rotulo: string; valor: number; sub: string; cor: string; esmaecido?: boolean }) {
+  return (
+    <div style={{ padding: '14px 16px', borderRadius: 12, background: 'var(--c-surface2)', border: '1px solid var(--c-border)', opacity: esmaecido ? 0.55 : 1 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: cor, flex: 'none' }} />
+        <span style={{ color: 'var(--c-ink3)', fontSize: 12, fontWeight: 600 }}>{rotulo}</span>
+      </div>
+      <div style={{ color: 'var(--c-ink)', fontSize: 27, fontWeight: 700, lineHeight: 1.15, marginTop: 6 }}>{fmtMilhar(valor)}</div>
+      <div style={{ color: 'var(--c-ink3)', fontSize: 11.5, marginTop: 2 }}>{sub}</div>
     </div>
   );
 }
@@ -663,7 +712,7 @@ function MapeamentoModal({ colunas, obrigatorios, mapa, setMapa, busy, onCancel,
 }
 
 /* ============ ENVIAR FICHA ============ */
-function Enviar({ empresas, uploads, contas = [], isMember, bloqueado = false, onBloqueado, onChange, showToast }: { empresas: any[]; uploads: Upload[]; contas?: ClinicAccount[]; isMember: boolean; bloqueado?: boolean; onBloqueado?: () => void; onChange: () => Promise<void>; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void }) {
+function Enviar({ empresas, uploads, contas = [], isMember, filtroMembro = '', filtroEmpresa = '', ativo = true, bloqueado = false, onBloqueado, onChange, showToast }: { empresas: any[]; uploads: Upload[]; contas?: ClinicAccount[]; isMember: boolean; filtroMembro?: string; filtroEmpresa?: string; ativo?: boolean; bloqueado?: boolean; onBloqueado?: () => void; onChange: () => Promise<void>; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void }) {
   const [empresaId, setEmpresaId] = useState<number | ''>('');
   const [nomeLista, setNomeLista] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -673,6 +722,21 @@ function Enviar({ empresas, uploads, contas = [], isMember, bloqueado = false, o
   // Mapeamento de colunas (previne planilhas com cabeçalhos errados).
   const [mapPreview, setMapPreview] = useState<{ colunas: string[]; obrigatorios: string[] } | null>(null);
   const [mapa, setMapa] = useState<Record<string, string>>({});
+
+  // Analítico do que já foi enviado ao CMD. Agregado no backend porque
+  // /patients traz no máximo 500 linhas — contar no cliente daria errado.
+  // Só busca com a aba ABERTA: as páginas ficam montadas com display:none, e
+  // sem isso pagaríamos a consulta mesmo com o usuário em outra tela.
+  const [analitico, setAnalitico] = useState<FichasAnalitico | null>(null);
+  const totalEnviado = uploads.reduce((s, u) => s + u.patients_registered, 0);
+  useEffect(() => {
+    if (!ativo) return;
+    const q: string[] = [];
+    if (filtroMembro) q.push(`member_user_id=${filtroMembro}`);
+    if (empresas.length > 1 && filtroEmpresa) q.push(`empresa_id=${filtroEmpresa}`);
+    apiGet<FichasAnalitico>(`/fichas/analitico?${q.join('&')}`).then(setAnalitico).catch(() => setAnalitico(null));
+    // totalEnviado muda quando a automação cadastra → atualiza os números.
+  }, [ativo, filtroMembro, filtroEmpresa, empresas.length, totalEnviado]);
 
   // 1º passo: lê os cabeçalhos do arquivo e abre a tela de mapeamento.
   const abrirMapeamento = async () => {
@@ -726,6 +790,7 @@ function Enviar({ empresas, uploads, contas = [], isMember, bloqueado = false, o
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {analitico && analitico.total > 0 && <AnaliticoFichas a={analitico} />}
       <Card style={{ padding: 24 }}>
         <div style={{ color: 'var(--c-ink)', fontSize: 16, fontWeight: 700 }}>Importar planilha (CSV / Excel / XML)</div>
         <div style={{ color: 'var(--c-ink3)', fontSize: 13, marginTop: 4 }}>Envie a planilha e <b>confira o mapeamento das colunas</b> antes de importar — evita erro por cabeçalho fora do padrão.</div>

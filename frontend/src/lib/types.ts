@@ -36,6 +36,19 @@ export interface Me {
   acesso_automacao?: AcessoAutomacao | null;
 }
 
+/** Analítico da tela de Fichas: o que foi enviado ao CMD.
+ * `sem_idade` = cadastros anteriores à coleta da idade (o CADSUS só informa
+ * durante a automação). Exibido de propósito: sem ele o recorte etário não
+ * fecharia com o total. */
+export interface FichasAnalitico {
+  total: number;
+  oci: number;
+  cirurgia: number;
+  faixa_0_8: number;
+  faixa_9_mais: number;
+  sem_idade: number;
+}
+
 /** Por que a automação está bloqueada (o painel usa para abrir o aviso). */
 export interface AcessoAutomacao {
   liberado: boolean;

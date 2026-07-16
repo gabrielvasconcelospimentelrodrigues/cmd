@@ -107,6 +107,23 @@ function fmtDate(d: Date): string {
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 }
 
+/**
+ * Idade (anos completos) na data do atendimento, ou null sem nascimento.
+ *
+ * Exportada porque é a MESMA regra que decide o procedimento/CID (0-8 x 9+) e
+ * que o worker grava em patient_records.idade_no_atendimento — as duas coisas
+ * têm de concordar, então vive num lugar só.
+ */
+export function calcularIdade(dataNascimento: Date | null, dataAtendimento: Date | null): number | null {
+  if (!dataNascimento || !dataAtendimento) return null;
+  let idade = dataAtendimento.getFullYear() - dataNascimento.getFullYear();
+  const antesDoAniversario =
+    dataAtendimento.getMonth() < dataNascimento.getMonth() ||
+    (dataAtendimento.getMonth() === dataNascimento.getMonth() && dataAtendimento.getDate() < dataNascimento.getDate());
+  if (antesDoAniversario) idade--;
+  return idade;
+}
+
 export interface PatientData {
   cns: string;
   nome: string;
@@ -729,13 +746,7 @@ export class WebAutomator {
 
   /** Idade (anos completos) na data do atendimento, ou null se não há nascimento. */
   private idadeNaData(dataNascimento: Date | null, dataAtendimento: Date): number | null {
-    if (!dataNascimento) return null;
-    let idade = dataAtendimento.getFullYear() - dataNascimento.getFullYear();
-    const antesDoAniversario =
-      dataAtendimento.getMonth() < dataNascimento.getMonth() ||
-      (dataAtendimento.getMonth() === dataNascimento.getMonth() && dataAtendimento.getDate() < dataNascimento.getDate());
-    if (antesDoAniversario) idade--;
-    return idade;
+    return calcularIdade(dataNascimento, dataAtendimento);
   }
 
   /** Códigos de procedimento conforme a idade na data do atendimento. */

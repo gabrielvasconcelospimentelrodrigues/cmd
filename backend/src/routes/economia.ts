@@ -226,6 +226,71 @@ export async function economiaRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
+  /**
+   * Analítico da tela de Fichas: o que foi ENVIADO ao CMD, por modalidade
+   * (OCI x Cirurgia) e por faixa etária (0-8 x 9+).
+   *
+   * Agrega no banco de propósito: /patients devolve no máximo 500 linhas, então
+   * contar no frontend daria número errado (são ~9.500 fichas).
+   *
+   * A idade só existe para cadastros feitos a partir da coluna
+   * idade_no_atendimento (o CADSUS é quem informa, durante a automação). O
+   * histórico anterior vem em 'sem_idade' — por isso devolvemos esse número em
+   * vez de escondê-lo: um recorte etário que não fecha com o total mentiria.
+   */
+  app.get('/fichas/analitico', { preHandler: [app.authenticate] }, async (req) => {
+    const tid = req.tenant!.id;
+    const OK = "('registered','verified_ok','verified_divergent','done_manually')";
+    const { clinic_account_id, member_user_id, empresa_id } = req.query as { clinic_account_id?: string; member_user_id?: string; empresa_id?: string };
+
+    let sqlFilter = 'AND ca.tenant_id = $1';
+    const params: any[] = [tid];
+
+    // Mesmo escopo do /stats: membro só vê o dele; dono pode filtrar.
+    const activeMemberId = req.member ? req.member.user_id : (member_user_id || null);
+    const activeEmpresaId = req.member ? req.member.empresa_id : (empresa_id ? Number(empresa_id) : null);
+
+    if (activeEmpresaId) {
+      sqlFilter += ` AND (ca.empresa_id = $${params.length + 1} OR u.empresa_id = $${params.length + 1})`;
+      params.push(activeEmpresaId);
+    }
+    if (activeMemberId) {
+      sqlFilter += ` AND (ca.member_user_id = $${params.length + 1}::uuid OR u.uploaded_by = $${params.length + 1}::uuid)`;
+      params.push(activeMemberId);
+    } else if (!req.member && clinic_account_id) {
+      const caIds = await resolverCaIds(req, tid, clinic_account_id);
+      if (caIds) {
+        sqlFilter += ` AND ca.id = ANY($${params.length + 1}::bigint[])`;
+        params.push(caIds);
+      }
+    }
+
+    const { rows } = await getPool().query(
+      `SELECT
+         count(*) AS total,
+         count(*) FILTER (WHERE pr.modalidade = 'catarata') AS cirurgia,
+         count(*) FILTER (WHERE pr.modalidade IS DISTINCT FROM 'catarata') AS oci,
+         count(*) FILTER (WHERE pr.idade_no_atendimento <= 8) AS faixa_0_8,
+         count(*) FILTER (WHERE pr.idade_no_atendimento >= 9) AS faixa_9_mais,
+         count(*) FILTER (WHERE pr.idade_no_atendimento IS NULL) AS sem_idade
+       FROM patient_records pr
+       JOIN clinic_accounts ca ON ca.id = pr.clinic_account_id
+       JOIN uploads u ON u.id = pr.upload_id AND u.deleted_at IS NULL
+       WHERE pr.status IN ${OK} ${sqlFilter}`,
+      params,
+    );
+
+    const r = rows[0] ?? {};
+    return {
+      total: Number(r.total ?? 0),
+      oci: Number(r.oci ?? 0),
+      cirurgia: Number(r.cirurgia ?? 0),
+      faixa_0_8: Number(r.faixa_0_8 ?? 0),
+      faixa_9_mais: Number(r.faixa_9_mais ?? 0),
+      sem_idade: Number(r.sem_idade ?? 0),
+    };
+  });
+
   // Visão geral do super admin: economia de todos os clientes (a partir da view).
   app.get('/admin/economia', { preHandler: [app.authenticateSuperAdmin] }, async () => {
     const { rows } = await getPool().query(

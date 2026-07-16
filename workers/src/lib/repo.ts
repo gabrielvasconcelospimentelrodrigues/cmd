@@ -222,11 +222,28 @@ export async function marcarFaltandoDados(uploadId: number): Promise<number> {
 }
 
 /** Atualiza o status de um paciente (e marca registered_at quando cadastrado). */
-export async function marcarPaciente(id: number, status: string, errorMessage = ''): Promise<void> {
-  await supabaseAdmin
-    .from('patient_records')
-    .update({ status, error_message: errorMessage, registered_at: status === 'registered' ? new Date().toISOString() : null })
-    .eq('id', id);
+/**
+ * `extra` grava, no MESMO update (sem request a mais — o egress do Supabase é
+ * caro), o que só o CADSUS sabe: a data de nascimento e a idade na data do
+ * atendimento. É o que alimenta o analítico por faixa etária (0-8 x 9+).
+ */
+export async function marcarPaciente(
+  id: number,
+  status: string,
+  errorMessage = '',
+  extra?: { data_nascimento?: string | null; idade_no_atendimento?: number | null },
+): Promise<void> {
+  const patch: Record<string, unknown> = {
+    status,
+    error_message: errorMessage,
+    registered_at: status === 'registered' ? new Date().toISOString() : null,
+  };
+  // Só sobrescreve o que veio preenchido — nunca apaga um dado já existente.
+  if (extra?.data_nascimento) patch.data_nascimento = extra.data_nascimento;
+  if (extra?.idade_no_atendimento !== null && extra?.idade_no_atendimento !== undefined) {
+    patch.idade_no_atendimento = extra.idade_no_atendimento;
+  }
+  await (supabaseAdmin as any).from('patient_records').update(patch).eq('id', id);
 }
 
 /** Id (em cache) do tipo de automação do cadastro CMD — para as métricas. */
