@@ -28,7 +28,28 @@ export interface UploadComConta {
   patients_errored: number;
   registro_iniciado_em: string | null;
   retry_rounds: number;
+  // Terminal escolhido para rodar esta lista (1..N) — N = terminais contratados.
+  empresa_id: number | null;
+  terminal_slot: number | null;
   clinic_accounts: ContaInfo | null;
+}
+
+/**
+ * Quantos terminais a empresa contratou = quantas listas ela pode rodar ao
+ * MESMO tempo (1 ficha por terminal). Sem empresa, cai no total do assinante.
+ *
+ * Math.max(1, …) igual ao seletor do painel: contas internas (demo/teste) têm
+ * 0 contratados e mesmo assim precisam rodar — 0 aqui as travaria para sempre.
+ */
+export async function terminaisContratados(empresaId: number | null, tenantId: number): Promise<number> {
+  if (empresaId) {
+    const { data } = await (supabaseAdmin as any)
+      .from('empresas').select('terminais_contratados').eq('id', empresaId).maybeSingle();
+    if (data) return Math.max(1, Number(data.terminais_contratados ?? 0));
+  }
+  const { data: t } = await (supabaseAdmin as any)
+    .from('tenants').select('max_terminais').eq('id', tenantId).maybeSingle();
+  return Math.max(1, Number(t?.max_terminais ?? 0));
 }
 
 /** Grava uma linha de log visível no painel (equivalente ao _log do Django). */
@@ -325,7 +346,7 @@ export async function getUploadComConta(uploadId: number): Promise<UploadComCont
   const { data, error } = await supabaseAdmin
     .from('uploads')
     .select(
-      'id, status, clinic_account_id, file_path, mapeamento_campos, patients_registered, patients_errored, registro_iniciado_em, retry_rounds, ' +
+      'id, status, clinic_account_id, empresa_id, terminal_slot, file_path, mapeamento_campos, patients_registered, patients_errored, registro_iniciado_em, retry_rounds, ' +
         'clinic_accounts:clinic_account_id (id, tenant_id, empresa_id, is_enabled, cmd_username, cmd_password_encrypted, mfa_secret_encrypted, cid_padrao, cid_oci_0_8, cid_9_mais, dias_execucao, horario_inicio_execucao, horario_fim_execucao, pausa_inicio, pausa_fim, delay_inicio_minutos)',
     )
     .eq('id', uploadId)

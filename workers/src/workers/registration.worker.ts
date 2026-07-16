@@ -3,7 +3,7 @@ import { bullConnection, connection } from '../lib/redis';
 import { QUEUE, type UploadJob, registrationQueue, verificationQueue } from '../queues';
 import { env } from '../config/env';
 import {
-  logEntry, setUploadStatus, getUploadComConta, listarPendentes, marcarPaciente, atualizarContadores, statusDoUpload, registrarExecucao, contarStatus, acrescentarTempoAtivo, jaCadastrado, marcarDuplicados, reenfileirarErros,
+  logEntry, setUploadStatus, getUploadComConta, listarPendentes, marcarPaciente, atualizarContadores, statusDoUpload, registrarExecucao, contarStatus, acrescentarTempoAtivo, jaCadastrado, marcarDuplicados, reenfileirarErros, terminaisContratados,
 } from '../lib/repo';
 import { proximaJanelaPermitida } from '../scheduling';
 import { verificarAcessoAutomacao } from '../lib/acesso';
@@ -91,21 +91,44 @@ export function startRegistrationWorker(): Worker<UploadJob> {
         return;
       }
 
-      // PARALELO POR LISTA: o CMD-COLETA aceita várias sessões do mesmo login,
-      // então N listas da MESMA conta rodam ao mesmo tempo — é isso que faz os
-      // terminais contratados valerem alguma coisa (3 terminais = 3 listas
-      // simultâneas, e não 3 rótulos para uma fila de 1).
+      // 1 FICHA POR TERMINAL. O cliente contrata N terminais e roda no máximo N
+      // listas ao mesmo tempo — é isso que dá sentido a contratar e a escolher
+      // terminal. O CMD-COLETA aceita várias sessões do mesmo login, então os N
+      // rodam em paralelo mesmo compartilhando a conta (verificado em produção:
+      // 2 listas cadastraram no mesmo segundo, cada lista no ritmo de quando
+      // rodava sozinha).
       //
-      // Existiu aqui uma trava por conta, posta durante o incidente dos
-      // duplicados. Mas naquele lote havia outras causas ativas (Finalizar que
-      // não fechava o rascunho, timeout curto matando cadastro que ia concluir,
-      // ACESSAR caindo no SISCAN) — todas corrigidas depois. A trava levou
-      // culpa que era das outras.
+      // Existiu aqui uma trava por CONTA, posta durante o incidente dos
+      // duplicados — ela serializava tudo, então o cliente pagava 3 terminais e
+      // recebia 1. Naquele lote havia outras causas ativas (Finalizar que não
+      // fechava o rascunho, timeout curto matando cadastro que ia concluir,
+      // ACESSAR caindo no SISCAN), todas corrigidas depois: a trava levou culpa
+      // que era das outras.
       //
-      // A rede de segurança contra duplicidade é o dedup: mesmo CNS + data +
-      // modalidade já cadastrado vai para Pendências em vez de ser recadastrado.
-      // O lock por LISTA continua: impede a MESMA lista rodar 2x (job duplicado).
-      const execucao = await withLock(`upload:${uploadId}`, async () => {
+      // Rede contra duplicidade = dedup (mesmo CNS + data + modalidade vai para
+      // Pendências). O lock por LISTA impede a MESMA lista rodar 2x.
+      const empresaId = upload.empresa_id ?? conta.empresa_id ?? null;
+      const totalTerminais = await terminaisContratados(empresaId, conta.tenant_id);
+      const chaveTerminal = empresaId ? `emp${empresaId}` : `tenant${conta.tenant_id}`;
+
+      // Tenta o terminal ESCOLHIDO primeiro; se ele estiver ocupado, usa
+      // qualquer outro livre — deixar a lista esperando com terminal vago
+      // pareceria bug. O que precisa valer é o teto de N simultâneas.
+      const escolhido = upload.terminal_slot;
+      const ordem = [
+        ...(escolhido && escolhido >= 1 && escolhido <= totalTerminais ? [escolhido] : []),
+        ...Array.from({ length: totalTerminais }, (_, i) => i + 1),
+      ].filter((s, i, arr) => arr.indexOf(s) === i);
+
+      let slotUsado: number | null = null;
+      let execucao: string | undefined;
+      for (const slot of ordem) {
+        const r = await withLock(`slot:${chaveTerminal}:${slot}`, async () => {
+          // Só chega aqui se PEGOU o terminal — é o que distingue "terminal
+          // ocupado" de um 'locked' vindo do lock por lista, lá dentro.
+          slotUsado = slot;
+          if (slot !== escolhido) await setUploadStatus(uploadId, 'registering', { terminal_slot: slot });
+          return await withLock(`upload:${uploadId}`, async () => {
         const config = await getMotorConfig().catch(() => MOTOR_CONFIG_PADRAO);
         const loginTimeoutMs = config.login_timeout_segundos * 1000;
         const cadastroTimeoutMs = config.cadastro_timeout_segundos * 1000;
@@ -327,15 +350,30 @@ export function startRegistrationWorker(): Worker<UploadJob> {
           // retomando/erro) e zera o marcador de sessão.
           await acrescentarTempoAtivo(uploadId, (Date.now() - sessaoInicioMs) / 1000);
         }
-      });
+          });
+        });
+        if (slotUsado !== null) { execucao = r as string; break; } // pegou terminal
+      }
+
+      if (slotUsado === null) {
+        // Todos os N terminais contratados estão ocupados — espera a vez. Vai p/
+        // 'extracted' (o watchdog trata esse status) e re-agenda com jobId fixo
+        // (dedupe: não empilha). Se esse re-enqueue for engolido pelo BullMQ
+        // (corrida do jobId ativo) e a lista orfanar, o WATCHDOG re-adiciona a
+        // cada 30s e recupera.
+        const st = await statusDoUpload(uploadId);
+        if (st !== 'paused' && st !== 'parado') {
+          await setUploadStatus(uploadId, 'extracted', {
+            current_step: `Na fila — os ${totalTerminais} terminal(is) contratado(s) estão ocupados…`,
+          });
+        }
+        await registrationQueue.add('registrar', { uploadId }, { delay: 30_000, jobId: `wait-conta-${uploadId}`, removeOnComplete: true, removeOnFail: true });
+        return;
+      }
 
       if (execucao === 'locked') {
-        // ESTA MESMA lista já está sendo processada por outro job (duplicado).
-        // Não é fila por conta: listas de contas iguais ou diferentes rodam em
-        // paralelo. Vai p/ 'extracted' (o watchdog trata esse status) e
-        // re-agenda com jobId fixo (dedupe: não empilha). Se esse re-enqueue for
-        // engolido pelo BullMQ (corrida do jobId ativo) e a lista orfanar, o
-        // WATCHDOG re-adiciona a cada 30s e recupera.
+        // ESTA MESMA lista já está sendo processada por outro job (duplicado) —
+        // não é falta de terminal. Re-agenda para daqui a pouco.
         const st = await statusDoUpload(uploadId);
         if (st !== 'paused' && st !== 'parado') {
           await setUploadStatus(uploadId, 'extracted', { current_step: 'Na fila — retomando em instantes…' });
