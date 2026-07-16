@@ -91,13 +91,21 @@ export function startRegistrationWorker(): Worker<UploadJob> {
         return;
       }
 
-      // SERIALIZA POR CONTA CMD: 2 automações na MESMA conta rodando juntas se
-      // atrapalham (sessões concorrentes → login instável, campos travando,
-      // relogins — comprovado por trace interleaved). Só 1 lista por vez POR CONTA;
-      // contas DIFERENTES rodam em paralelo (5 empresas = 5 em paralelo). A 2ª
-      // lista da mesma conta espera a vez.
-      const execucao = await withLock(`conta:${conta.id}`, async () => {
-      const resultado = await withLock(`upload:${uploadId}`, async () => {
+      // PARALELO POR LISTA: o CMD-COLETA aceita várias sessões do mesmo login,
+      // então N listas da MESMA conta rodam ao mesmo tempo — é isso que faz os
+      // terminais contratados valerem alguma coisa (3 terminais = 3 listas
+      // simultâneas, e não 3 rótulos para uma fila de 1).
+      //
+      // Existiu aqui uma trava por conta, posta durante o incidente dos
+      // duplicados. Mas naquele lote havia outras causas ativas (Finalizar que
+      // não fechava o rascunho, timeout curto matando cadastro que ia concluir,
+      // ACESSAR caindo no SISCAN) — todas corrigidas depois. A trava levou
+      // culpa que era das outras.
+      //
+      // A rede de segurança contra duplicidade é o dedup: mesmo CNS + data +
+      // modalidade já cadastrado vai para Pendências em vez de ser recadastrado.
+      // O lock por LISTA continua: impede a MESMA lista rodar 2x (job duplicado).
+      const execucao = await withLock(`upload:${uploadId}`, async () => {
         const config = await getMotorConfig().catch(() => MOTOR_CONFIG_PADRAO);
         const loginTimeoutMs = config.login_timeout_segundos * 1000;
         const cadastroTimeoutMs = config.cadastro_timeout_segundos * 1000;
@@ -320,18 +328,17 @@ export function startRegistrationWorker(): Worker<UploadJob> {
           await acrescentarTempoAtivo(uploadId, (Date.now() - sessaoInicioMs) / 1000);
         }
       });
-      return resultado;
-      }); // fecha o lock por CONTA CMD
 
       if (execucao === 'locked') {
-        // Conta CMD ocupada por OUTRA lista — espera a vez. Vai p/ 'extracted'
-        // (o watchdog trata esse status) e re-agenda com jobId fixo (dedupe: não
-        // empilha). Se esse re-enqueue for engolido pelo BullMQ (corrida do
-        // jobId ativo) e a lista orfanar, o WATCHDOG re-adiciona a cada 30s e
-        // recupera — combo jobId (anti-pile-up) + watchdog (anti-órfã).
+        // ESTA MESMA lista já está sendo processada por outro job (duplicado).
+        // Não é fila por conta: listas de contas iguais ou diferentes rodam em
+        // paralelo. Vai p/ 'extracted' (o watchdog trata esse status) e
+        // re-agenda com jobId fixo (dedupe: não empilha). Se esse re-enqueue for
+        // engolido pelo BullMQ (corrida do jobId ativo) e a lista orfanar, o
+        // WATCHDOG re-adiciona a cada 30s e recupera.
         const st = await statusDoUpload(uploadId);
         if (st !== 'paused' && st !== 'parado') {
-          await setUploadStatus(uploadId, 'extracted', { current_step: 'Na fila — aguardando a conta CMD liberar…' });
+          await setUploadStatus(uploadId, 'extracted', { current_step: 'Na fila — retomando em instantes…' });
         }
         await registrationQueue.add('registrar', { uploadId }, { delay: 30_000, jobId: `wait-conta-${uploadId}`, removeOnComplete: true, removeOnFail: true });
         return;

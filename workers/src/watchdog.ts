@@ -16,15 +16,22 @@ let ultimoRun = 0;
 export async function recuperarUploadsTravados(forcar = false): Promise<void> {
   try {
     // ANTI-ÓRFÃ (roda SEMPRE, a cada 30s — fora do gate de 5 min): listas presas
-    // em 'extracted' "aguardando a conta CMD" precisam de um job de espera. O
-    // re-enqueue usa jobId FIXO (wait-conta-N): se já existe um job, o BullMQ
-    // ignora (não empilha); se o job foi perdido (órfã), re-adiciona e recupera.
+    // em 'extracted' "na fila" precisam de um job de espera. O re-enqueue usa
+    // jobId FIXO (wait-conta-N): se já existe um job, o BullMQ ignora (não
+    // empilha); se o job foi perdido (órfã), re-adiciona e recupera.
+    //
+    // Casa pelo TEXTO de propósito — não por status. 'extracted' também é o
+    // estado de quem está esperando o delay de início configurado, e essas têm
+    // um job agendado: re-enfileirar aqui furaria o delay. O texto delas é
+    // "Aguardando cadastro (N prontos)…", que não bate com nenhum destes.
+    // ("aguardando a conta" é o texto ANTIGO, de quando havia fila por conta —
+    // mantido para recuperar listas gravadas antes desta versão.)
     const { data: aguardando } = await supabaseAdmin
       .from('uploads')
       .select('id')
       .eq('status', 'extracted')
       .is('deleted_at', null)
-      .ilike('current_step', '%aguardando a conta%');
+      .or('current_step.ilike.%Na fila%,current_step.ilike.%aguardando a conta%');
     for (const up of (aguardando ?? [])) {
       await registrationQueue.add('registrar', { uploadId: up.id }, { delay: 3_000, jobId: `wait-conta-${up.id}`, removeOnComplete: true, removeOnFail: true }).catch(() => {});
     }
