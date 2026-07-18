@@ -339,12 +339,31 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
       caIds = (cas ?? []).map(c => Number(c.id));
     }
 
-    const { data } = await (supabaseAdmin as any)
+    const CAMPOS = 'id, upload_id, nome, cns, data_atendimento, clinic_account_id, cid10_codigo, medico_nome, modalidade, status, error_message, created_at, clinic_accounts!inner(tenant_id), uploads!inner(deleted_at, clinic_account_id, empresa_id, uploaded_by)';
+
+    // FILTRA POR TENANT NO BANCO. Antes buscava os 500 últimos registros de
+    // TODOS os clientes e só depois filtrava por tenant no JS — como a janela
+    // era compartilhada, um cliente ativo empurrava os registros do outro para
+    // fora dela e o painel escondia pendências reais (visto em produção: o ML
+    // ocupava 279 dos 500 slots e o Instituto exibia 4 de 8 pendências).
+    const base = () => (supabaseAdmin as any)
       .from('patient_records')
-      .select('id, upload_id, nome, cns, data_atendimento, clinic_account_id, cid10_codigo, medico_nome, modalidade, status, error_message, created_at, clinic_accounts(tenant_id), uploads!inner(deleted_at, clinic_account_id, empresa_id, uploaded_by)')
-      .is('uploads.deleted_at', null)
-      .order('id', { ascending: false })
-      .limit(500);
+      .select(CAMPOS)
+      .eq('clinic_accounts.tenant_id', req.tenant!.id)
+      .is('uploads.deleted_at', null);
+
+    // As PENDÊNCIAS vêm sempre inteiras, sem depender do limite: são a razão de
+    // ser da aba e costumam ser poucas (exceções). Truncá-las esconderia
+    // trabalho que o cliente precisa resolver.
+    const [{ data: pendencias }, { data: recentes }] = await Promise.all([
+      base().in('status', ['error', 'needs_review']).order('id', { ascending: false }).limit(2000),
+      base().order('id', { ascending: false }).limit(500),
+    ]);
+
+    // Une sem repetir (uma pendência recente aparece nas duas consultas).
+    const porId = new Map<number, any>();
+    for (const r of [...(pendencias ?? []), ...(recentes ?? [])]) porId.set(Number(r.id), r);
+    const data = [...porId.values()].sort((a, b) => Number(b.id) - Number(a.id));
 
     // Filter programmatically since RLS or query structure handles tenant nesting
     const filtered = (data ?? []).filter((pr: any) => {
