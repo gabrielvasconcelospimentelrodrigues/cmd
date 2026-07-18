@@ -57,8 +57,10 @@ export interface Tenant {
   valor_terminal: string; // mensalidade por terminal/funcionário (numeric → string)
   valor_implantacao: string; // implantação única do assinante (numeric → string)
   implantacao_paga: boolean;
-  /** true = roda automação sem pagar (contas internas de demo/teste). */
+  /** true = roda automação sem pagar (parceiro / conta de teste). */
   isento_pagamento: boolean;
+  /** Fim da isenção. null = indeterminado (parceiro); data = período de teste. */
+  isento_ate: string | null;
   onboarding_concluido: boolean;
   cnpj: string | null;
   responsavel: string | null;
@@ -232,7 +234,7 @@ type Tbl<R, I, U> = { Row: Simplify<R>; Insert: I; Update: Simplify<U>; Relation
 export interface Database {
   public: {
     Tables: {
-      tenants: Tbl<Tenant, Insert<Tenant, 'status' | 'custo_mensal_funcionario' | 'salario_medio_funcionario' | 'horas_trabalhadas_mes' | 'salario_bruto_medio' | 'porcentagem_encargos' | 'beneficios_mensais_total' | 'custo_infra_estacao_trabalho' | 'horas_uteis_mes' | 'funcionarios_operacao' | 'cadastros_dia_funcionario' | 'cota_mensal_pacientes' | 'valor_terminal' | 'valor_implantacao' | 'implantacao_paga' | 'isento_pagamento' | 'onboarding_concluido' | 'cnpj' | 'responsavel' | 'telefone' | 'cidade'>, Partial<Tenant>>;
+      tenants: Tbl<Tenant, Insert<Tenant, 'status' | 'custo_mensal_funcionario' | 'salario_medio_funcionario' | 'horas_trabalhadas_mes' | 'salario_bruto_medio' | 'porcentagem_encargos' | 'beneficios_mensais_total' | 'custo_infra_estacao_trabalho' | 'horas_uteis_mes' | 'funcionarios_operacao' | 'cadastros_dia_funcionario' | 'cota_mensal_pacientes' | 'valor_terminal' | 'valor_implantacao' | 'implantacao_paga' | 'isento_pagamento' | 'isento_ate' | 'onboarding_concluido' | 'cnpj' | 'responsavel' | 'telefone' | 'cidade'>, Partial<Tenant>>;
       empresas: Tbl<Empresa, Insert<Empresa, 'cnpj' | 'taxa_empresa' | 'taxa_paga' | 'terminais_contratados'>, Partial<Empresa>>;
       clinic_accounts: Tbl<ClinicAccount, Insert<ClinicAccount, 'empresa_id' | 'cid_padrao' | 'cid_oci_0_8' | 'cid_9_mais' | 'member_user_id' | 'is_enabled' | 'dias_execucao' | 'horario_inicio_execucao' | 'horario_fim_execucao' | 'pausa_inicio' | 'pausa_fim' | 'delay_inicio_minutos' | 'last_run_at' | 'last_run_status'>, Partial<ClinicAccount>>;
       tenant_members: Tbl<TenantMember, Insert<TenantMember, 'empresa_id' | 'nome' | 'role'>, Partial<TenantMember>>;

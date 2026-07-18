@@ -17,13 +17,20 @@ export interface AcessoAutomacao {
 export async function verificarAcessoAutomacao(tenantId: number): Promise<AcessoAutomacao> {
   const { data: tenant } = await (supabaseAdmin as any)
     .from('tenants')
-    .select('id, isento_pagamento, implantacao_paga, valor_implantacao')
+    .select('id, isento_pagamento, isento_ate, implantacao_paga, valor_implantacao')
     .eq('id', tenantId)
     .maybeSingle();
 
   // Sem tenant não dá para afirmar que está bloqueado — não travamos a operação.
   if (!tenant) return { liberado: true, motivo: null, mensagem: '' };
-  if (tenant.isento_pagamento) return { liberado: true, motivo: null, mensagem: '' };
+
+  // Isenção vale enquanto vigente: sem checar a data, um período de teste com
+  // prazo marcado nunca terminaria e o cliente ficaria de graça para sempre.
+  if (tenant.isento_pagamento) {
+    const vigente = !tenant.isento_ate
+      || String(tenant.isento_ate).slice(0, 10) >= new Date().toISOString().slice(0, 10);
+    if (vigente) return { liberado: true, motivo: null, mensagem: '' };
+  }
 
   if (!tenant.implantacao_paga && Number(tenant.valor_implantacao ?? 0) > 0) {
     return {

@@ -38,8 +38,21 @@ const TIPOS_USO_TERMINAL = ['mensalidade', 'terminal_proporcional'];
 export interface TenantAcesso {
   id: number;
   isento_pagamento?: boolean | null;
+  /** Fim da isenção. null = indeterminado (parceiro); data = período de teste. */
+  isento_ate?: string | null;
   implantacao_paga?: boolean | null;
   valor_implantacao?: number | string | null;
+}
+
+/**
+ * Isenção VIGENTE hoje. Sem esta checagem, um período de teste com data
+ * marcada nunca terminaria — o cliente ficaria isento para sempre e o
+ * bloqueio por pagamento jamais voltaria a valer.
+ */
+export function isencaoVigente(tenant: TenantAcesso): boolean {
+  if (!tenant.isento_pagamento) return false;
+  if (!tenant.isento_ate) return true; // indeterminado (parceiro)
+  return String(tenant.isento_ate).slice(0, 10) >= new Date().toISOString().slice(0, 10);
 }
 
 /**
@@ -48,8 +61,8 @@ export interface TenantAcesso {
  * jornada de cobrança primeiro (implantação antes de mensalidade).
  */
 export async function verificarAcessoAutomacao(tenant: TenantAcesso): Promise<AcessoAutomacao> {
-  // Contas internas (demo/teste) rodam sem pagar.
-  if (tenant.isento_pagamento) return LIBERADO;
+  // Isento (parceiro/teste) roda sem pagar — enquanto a isenção estiver vigente.
+  if (isencaoVigente(tenant)) return LIBERADO;
 
   const valorImplantacao = Number(tenant.valor_implantacao ?? 0);
 

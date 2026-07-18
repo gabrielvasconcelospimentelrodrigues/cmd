@@ -1647,16 +1647,41 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
                   por isso fica destacado, para não passar despercebido numa
                   conta que deveria estar cobrando. */}
               <div style={{ marginTop: 16, padding: '13px 15px', borderRadius: 10, background: (plano as any).isento_pagamento ? 'var(--c-warnsoft)' : 'var(--c-surface2)', border: `1px solid ${(plano as any).isento_pagamento ? 'var(--c-warn)' : 'var(--c-border)'}` }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ color: 'var(--c-ink2)', fontSize: 13, fontWeight: 600 }}>Isento de pagamento (teste / parceiro)</span>
-                  <Switch on={!!(plano as any).isento_pagamento} onClick={() => patchTenant({ isento_pagamento: !(plano as any).isento_pagamento })} />
-                  <span style={{ fontSize: 12, fontWeight: 700, color: (plano as any).isento_pagamento ? 'var(--c-warnfg)' : 'var(--c-ink3)' }}>
-                    {(plano as any).isento_pagamento ? 'ISENTO — usa sem pagar' : 'cobrança normal'}
-                  </span>
-                </div>
-                <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>
-                  Ligado, o assinante roda a automação <b>sem nenhuma cobrança</b> — ignora implantação, mensalidade e faturas vencidas. Use só para conta de teste ou parceiro.
-                </div>
+                {(() => {
+                  const isento = !!(plano as any).isento_pagamento;
+                  const ate = (plano as any).isento_ate as string | null;
+                  const venceu = !!ate && ate < new Date().toISOString().slice(0, 10);
+                  return (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <span style={{ color: 'var(--c-ink2)', fontSize: 13, fontWeight: 600 }}>Isento de pagamento (teste / parceiro)</span>
+                        <Switch on={isento} onClick={() => patchTenant({ isento_pagamento: !isento })} />
+                        <span style={{ fontSize: 12, fontWeight: 700, color: venceu ? 'var(--c-err)' : isento ? 'var(--c-warnfg)' : 'var(--c-ink3)' }}>
+                          {!isento ? 'cobrança normal'
+                            : venceu ? 'TESTE VENCIDO — já voltou a cobrar'
+                            : ate ? `teste até ${ate.split('-').reverse().join('/')}`
+                            : 'ISENTO por tempo indeterminado'}
+                        </span>
+                      </div>
+
+                      {isento && (
+                        // Escolha do prazo: teste tem fim; parceiro não.
+                        <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
+                          <span style={{ color: 'var(--c-ink3)', fontSize: 12 }}>Prazo:</span>
+                          {[7, 15, 30].map((d) => (
+                            <button key={d} onClick={() => patchTenant({ isento_pagamento: true, isento_dias: d })} className="ia-btn-outline" style={{ padding: '0 11px', height: 28, fontSize: 12 }}>{d} dias</button>
+                          ))}
+                          <button onClick={() => patchTenant({ isento_pagamento: true, isento_dias: 0 })} className="ia-btn-outline" style={{ padding: '0 11px', height: 28, fontSize: 12, borderColor: !ate ? 'var(--c-blue)' : undefined, color: !ate ? 'var(--c-softfg)' : undefined }}>Indeterminado</button>
+                        </div>
+                      )}
+
+                      <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 8, lineHeight: 1.5 }}>
+                        Ligado, o assinante roda a automação <b>sem nenhuma cobrança</b> — ignora implantação, mensalidade e faturas vencidas.
+                        {isento && ate && !venceu && ' Quando o prazo vencer, a cobrança volta sozinha.'}
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Concede terminais sem cobrar — para teste/parceiro, já que o
