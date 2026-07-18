@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { supabaseAdmin } from '../lib/supabase';
 import { registrarLog, ator, atorNome } from '../lib/audit';
 import { getPrecos, precoTerminalNaPosicao } from '../lib/precos';
+import { pixDaCobranca } from '../lib/asaas';
 
 /**
  * Monta o resumo do PLANO de um assinante (tenant):
@@ -121,6 +122,60 @@ export async function empresaRoutes(app: FastifyInstance): Promise<void> {
       .eq('tenant_id', req.tenant!.id)
       .order('vencimento', { ascending: false });
     return data ?? [];
+  });
+
+  /**
+   * PIX da fatura (QR Code + copia-e-cola) para pagar SEM sair do painel.
+   *
+   * Mandar o cliente para a página do Asaas funciona, mas tira ele do produto
+   * no momento mais sensível. Aqui devolvemos os dados crus e o painel desenha
+   * o checkout — o pagamento continua sendo processado pelo Asaas.
+   */
+  app.get('/minhas-faturas/:id/pix', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+
+    // Só a fatura DESTE assinante — o filtro por tenant é a checagem de dono.
+    const { data: f } = await (supabaseAdmin as any)
+      .from('faturas')
+      .select('id, valor, status, descricao, vencimento, asaas_payment_id, link_pagamento')
+      .eq('id', id)
+      .eq('tenant_id', req.tenant!.id)
+      .maybeSingle();
+
+    if (!f) return reply.code(404).send({ error: 'Fatura não encontrada.' });
+    if (f.status === 'pago') return { pago: true };
+    if (!f.asaas_payment_id) {
+      return reply.code(409).send({ error: 'Esta fatura ainda não tem cobrança emitida. Fale com o suporte.' });
+    }
+
+    const pix = await pixDaCobranca(f.asaas_payment_id);
+    if (!pix) {
+      // Sem QR (ex.: Asaas fora do ar) o cliente ainda paga pela página deles.
+      return reply.code(502).send({ error: 'Não foi possível gerar o PIX agora.', link_pagamento: f.link_pagamento });
+    }
+
+    return {
+      pago: false,
+      valor: Number(f.valor),
+      descricao: f.descricao,
+      vencimento: f.vencimento,
+      qr_base64: pix.encodedImage,
+      copia_e_cola: pix.payload,
+      expira_em: pix.expirationDate ?? null,
+      // Boleto e cartão seguem na página do Asaas.
+      link_pagamento: f.link_pagamento,
+    };
+  });
+
+  /** Status da fatura — o checkout consulta para fechar sozinho ao ser pago. */
+  app.get('/minhas-faturas/:id/status', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+    const { data: f } = await (supabaseAdmin as any)
+      .from('faturas').select('status').eq('id', id).eq('tenant_id', req.tenant!.id).maybeSingle();
+    if (!f) return reply.code(404).send({ error: 'Fatura não encontrada.' });
+    return { status: f.status, pago: f.status === 'pago' };
   });
 
   // Empresas do assinante.

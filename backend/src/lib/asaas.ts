@@ -49,6 +49,27 @@ async function chamar<T>(caminho: string, metodo: 'GET' | 'POST', corpo?: unknow
   return json as T;
 }
 
+export interface PixDaCobranca {
+  encodedImage: string;   // QR Code em base64 (PNG)
+  payload: string;        // copia-e-cola
+  expirationDate?: string;
+}
+
+/**
+ * QR Code + copia-e-cola do PIX de uma cobrança, para o checkout dentro do
+ * painel. Devolve null em qualquer falha: o painel cai para a página do Asaas
+ * em vez de deixar o cliente sem como pagar.
+ */
+export async function pixDaCobranca(paymentId: string): Promise<PixDaCobranca | null> {
+  if (!asaasAtivo()) return null;
+  try {
+    return await chamar<PixDaCobranca>(`/payments/${paymentId}/pixQrCode`, 'GET');
+  } catch (e) {
+    console.error(`[asaas] falha ao obter PIX de ${paymentId}:`, (e as Error).message);
+    return null;
+  }
+}
+
 /** Só dígitos; CPF tem 11 e CNPJ 14 — o Asaas recusa qualquer outra coisa. */
 export function documentoValido(doc: string | null | undefined): string | null {
   const d = String(doc ?? '').replace(/\D/g, '');

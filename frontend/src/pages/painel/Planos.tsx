@@ -15,6 +15,8 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
   const [novaEmpresa, setNovaEmpresa] = useState(false);
   const [solicitando, setSolicitando] = useState(false);
   const [confirmar, setConfirmar] = useState<{ id: number; nome: string } | null>(null); // confirmação de contratação
+  // Checkout PIX dentro do painel (sem mandar o cliente para fora).
+  const [pagar, setPagar] = useState<{ id: number; valor: number; descricao: string } | null>(null);
   const [descontratar, setDescontratar] = useState<{ id: number; nome: string } | null>(null); // confirmação de descontratação
   const [excluirEmpresa, setExcluirEmpresa] = useState<{ id: number; nome: string; terminais: number } | null>(null); // confirmação de exclusão de empresa
   const [processando, setProcessando] = useState(false);
@@ -43,18 +45,17 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
     try {
       // O contrato já nasce com a cobrança: leva o cliente direto ao pagamento.
       // O terminal é liberado sozinho quando o Asaas confirma (webhook).
-      const r = await apiPost<{ link_pagamento: string | null; valor: number; erro_cobranca: string | null }>(
+      const r = await apiPost<{ fatura_id: number | null; link_pagamento: string | null; valor: number; erro_cobranca: string | null }>(
         '/terminal-requests', { empresa_id: empresaId },
       );
       setConfirmar(null);
       await carregar();
       if (onChange) await onChange();
 
-      if (r.link_pagamento) {
-        // Nova aba: abrir na mesma perderia o painel. Se o navegador bloquear o
-        // popup, o botão "Pagar" na lista de faturas continua disponível.
-        window.open(r.link_pagamento, '_blank', 'noopener,noreferrer');
-        showToast({ title: 'Terminal contratado', msg: 'Conclua o pagamento na aba aberta — o terminal libera automaticamente.', kind: 'ok' });
+      if (r.fatura_id) {
+        // Abre o checkout AQUI mesmo: o cliente paga e a tela confirma sozinha
+        // quando o terminal é liberado.
+        setPagar({ id: r.fatura_id, valor: r.valor, descricao: 'Novo terminal (valor proporcional)' });
       } else {
         // Sem link não há como pagar: avisa de verdade em vez de fingir sucesso.
         showToast({
@@ -343,12 +344,12 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
                 <span style={{ fontWeight: 600, color: cor, fontSize: 12 }}>{rotulo}</span>
                 <span style={{ textAlign: 'right' }}>
                   {podePagar ? (
-                    // Abre a página do Asaas (PIX / boleto / cartão). A baixa
-                    // chega sozinha por webhook — o cliente não precisa avisar.
-                    <a href={f.link_pagamento!} target="_blank" rel="noopener noreferrer"
-                       style={{ display: 'inline-block', padding: '7px 14px', borderRadius: 8, background: vencida ? 'var(--c-warn)' : 'var(--c-blued)', color: '#fff', fontSize: 12.5, fontWeight: 700, textDecoration: 'none' }}>
+                    // Checkout DENTRO do painel (PIX). A baixa chega sozinha
+                    // por webhook — o cliente não precisa avisar ninguém.
+                    <button onClick={() => setPagar({ id: f.id, valor: f.valor, descricao: f.descricao || f.tipo })}
+                       style={{ padding: '7px 14px', borderRadius: 8, border: 'none', background: vencida ? 'var(--c-warn)' : 'var(--c-blued)', color: '#fff', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                       Pagar
-                    </a>
+                    </button>
                   ) : (
                     <span style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{f.status === 'pago' ? '—' : 'em emissão'}</span>
                   )}
@@ -358,6 +359,19 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
           })
         )}
       </Card>
+
+      {pagar && (
+        <CheckoutPix
+          fatura={pagar}
+          onClose={() => setPagar(null)}
+          onPago={async () => {
+            setPagar(null);
+            await carregar();
+            if (onChange) await onChange();
+            showToast({ title: 'Pagamento confirmado!', msg: 'Tudo liberado — já pode usar.', kind: 'ok' });
+          }}
+        />
+      )}
 
       {novaEmpresa && <NovaEmpresaModal onClose={() => setNovaEmpresa(false)} onSaved={async () => { setNovaEmpresa(false); await carregar(); showToast({ title: 'Empresa cadastrada', msg: 'A taxa será definida pelo administrador.', kind: 'ok' }); }} onErr={(m) => showToast({ title: 'Falha', msg: m, kind: 'err' })} />}
 
@@ -646,6 +660,118 @@ function EquipeModal({ empresa, onClose, onChange, showToast }: { empresa: { id:
               </div>
             </div>
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * CHECKOUT PIX dentro do painel.
+ *
+ * Mandar o cliente para a página do Asaas funciona, mas o tira do produto no
+ * momento mais sensível — e depois de pagar ele não sabe se voltou tudo certo.
+ * Aqui ele vê o QR, paga, e a própria tela confirma: consultamos o status até
+ * o webhook dar a baixa. Boleto e cartão seguem no Asaas (link no rodapé).
+ */
+function CheckoutPix({ fatura, onClose, onPago }: { fatura: { id: number; valor: number; descricao: string }; onClose: () => void; onPago: () => Promise<void> }) {
+  const [dados, setDados] = useState<{ qr_base64: string; copia_e_cola: string; link_pagamento: string | null } | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+  const [linkFallback, setLinkFallback] = useState<string | null>(null);
+  const [copiado, setCopiado] = useState(false);
+
+  useEffect(() => {
+    let vivo = true;
+    apiGet<any>(`/minhas-faturas/${fatura.id}/pix`)
+      .then((r) => { if (!vivo) return; r.pago ? void onPago() : setDados(r); })
+      .catch((e) => {
+        if (!vivo) return;
+        setErro((e as Error).message);
+        // O backend devolve o link do Asaas quando não consegue gerar o QR.
+        setLinkFallback((e as any)?.link_pagamento ?? null);
+      });
+    return () => { vivo = false; };
+  }, [fatura.id]);
+
+  // Enquanto o modal está aberto, verifica se o pagamento entrou. O PIX cai em
+  // segundos e o webhook dá a baixa — assim a tela reage sozinha.
+  useEffect(() => {
+    const t = setInterval(() => {
+      apiGet<{ pago: boolean }>(`/minhas-faturas/${fatura.id}/status`)
+        .then((s) => { if (s.pago) { clearInterval(t); void onPago(); } })
+        .catch(() => {});
+    }, 5000);
+    return () => clearInterval(t);
+  }, [fatura.id]);
+
+  const copiar = async () => {
+    if (!dados) return;
+    try {
+      await navigator.clipboard.writeText(dados.copia_e_cola);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2500);
+    } catch { /* navegador sem permissão — o texto fica visível para copiar à mão */ }
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 120, background: 'rgba(7,11,22,.72)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} className="ia-card" style={{ width: 420, maxWidth: '100%', padding: 26, textAlign: 'center', animation: 'ia-slide .22s ease' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ color: 'var(--c-ink)', fontSize: 17, fontWeight: 700 }}>Pagar com PIX</div>
+            <div style={{ color: 'var(--c-ink3)', fontSize: 12.5, marginTop: 2 }}>{fatura.descricao}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--c-ink3)', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
+        </div>
+
+        <div style={{ color: 'var(--c-ink)', fontSize: 30, fontWeight: 800, margin: '16px 0 4px' }}>{brl(fatura.valor)}</div>
+
+        {erro ? (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--c-warnsoft)', color: 'var(--c-warnfg)', fontSize: 13, lineHeight: 1.5 }}>
+              Não consegui gerar o PIX agora.{linkFallback ? ' Use a página de pagamento:' : ' Tente novamente em instantes.'}
+            </div>
+            {linkFallback && (
+              <a href={linkFallback} target="_blank" rel="noopener noreferrer" className="ia-btn" style={{ display: 'inline-block', marginTop: 14, padding: '11px 20px', textDecoration: 'none' }}>Abrir pagamento</a>
+            )}
+          </div>
+        ) : !dados ? (
+          <div style={{ padding: '40px 0', color: 'var(--c-ink3)', fontSize: 13.5 }}>Gerando o QR Code…</div>
+        ) : (
+          <>
+            <img
+              src={`data:image/png;base64,${dados.qr_base64}`}
+              alt="QR Code do PIX"
+              style={{ width: 210, height: 210, margin: '10px auto 0', display: 'block', borderRadius: 10, background: '#fff', padding: 8 }}
+            />
+            <div style={{ color: 'var(--c-ink3)', fontSize: 12.5, margin: '10px 0 0' }}>Aponte a câmera do seu banco ou use o código abaixo</div>
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <input
+                readOnly
+                value={dados.copia_e_cola}
+                onFocus={(e) => e.currentTarget.select()}
+                className="ia-input"
+                style={{ flex: 1, fontSize: 11.5, fontFamily: 'monospace' }}
+              />
+              <button onClick={copiar} className="ia-btn" style={{ padding: '0 16px', fontSize: 13, whiteSpace: 'nowrap' }}>
+                {copiado ? 'Copiado!' : 'Copiar'}
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 16, color: 'var(--c-ink3)', fontSize: 12.5 }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--c-ok)', animation: 'ia-pulse 1.4s ease-in-out infinite' }} />
+              Aguardando o pagamento — esta tela confirma sozinha.
+            </div>
+
+            {dados.link_pagamento && (
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--c-border)' }}>
+                <a href={dados.link_pagamento} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--c-softfg)', fontSize: 12.5 }}>
+                  Prefere boleto ou cartão? Abrir outras formas de pagamento
+                </a>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

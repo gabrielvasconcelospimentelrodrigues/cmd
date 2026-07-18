@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Sliders, Shield, Pencil, Trash2, Plus, Wallet } from 'lucide-react';
+import { Sliders, Shield, Pencil, Trash2, Plus, Wallet, Building2 } from 'lucide-react';
 import { apiGet, apiPatch, apiDelete, apiPost } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import type { ClinicAccount, Tenant, TenantMember } from '../../lib/types';
 import { Card, Switch } from './parts';
+import { mascaraCpfCnpj, validaCpfCnpj, soDigitos } from '../../lib/documento';
 import { Field, PasswordField } from '../../components/iacmd/ui';
 import type { ToastData } from '../../components/iacmd/ui';
 
@@ -11,7 +12,7 @@ const DIAS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domi
 const DELAYS = [{ label: 'Imediato', v: 0 }, { label: '1 minuto', v: 1 }, { label: '2 minutos', v: 2 }, { label: '1 hora', v: 60 }];
 
 export default function Config({ tenant, contas, empresas = [], isMember = false, filtroMembro = '', onChange, showToast }: { tenant: Tenant | null; contas: ClinicAccount[]; empresas?: any[]; isMember?: boolean; filtroMembro?: string; onChange: () => Promise<void>; showToast: (t: ToastData) => void }) {
-  const [tab, setTab] = useState<'controles' | 'custos' | 'seguranca'>('controles');
+  const [tab, setTab] = useState<'controles' | 'cadastro' | 'custos' | 'seguranca'>('controles');
   const [novo, setNovo] = useState(false);
   const [membros, setMembros] = useState<TenantMember[]>([]);
 
@@ -33,6 +34,7 @@ export default function Config({ tenant, contas, empresas = [], isMember = false
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', gap: 8 }}>
         <TabBtn active={tab === 'controles'} onClick={() => setTab('controles')} icon={<Sliders size={15} />}>Controles</TabBtn>
+        {!isMember && <TabBtn active={tab === 'cadastro'} onClick={() => setTab('cadastro')} icon={<Building2 size={15} />}>Dados de faturamento</TabBtn>}
         <TabBtn active={tab === 'custos'} onClick={() => setTab('custos')} icon={<Wallet size={15} />}>Custos de Funcionário</TabBtn>
         <TabBtn active={tab === 'seguranca'} onClick={() => setTab('seguranca')} icon={<Shield size={15} />}>Segurança</TabBtn>
       </div>
@@ -53,6 +55,8 @@ export default function Config({ tenant, contas, empresas = [], isMember = false
           {contasVisiveis.map((c) => <AccountCard key={c.id} conta={c} empresas={empresas} membros={membros} isMember={isMember} onChange={onChange} showToast={showToast} />)}
         </>
       )}
+
+      {tab === 'cadastro' && <DadosFaturamento tenant={tenant} onChange={onChange} showToast={showToast} />}
 
       {tab === 'custos' && <Custos tenant={tenant} onChange={onChange} showToast={showToast} />}
 
@@ -345,6 +349,86 @@ function Seguranca({ showToast }: { showToast: (t: ToastData) => void }) {
 
 const numOr = (v: unknown, d = 0): number => { const x = Number(v); return Number.isNaN(x) ? d : x; };
 const brlFmt = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+/**
+ * Dados usados para EMITIR COBRANÇA. O CPF/CNPJ é obrigatório no Asaas: com ele
+ * errado, a cobrança não é emitida e o cliente fica sem como pagar — antes só o
+ * suporte conseguia corrigir, então o cliente travava sem saber o motivo.
+ */
+function DadosFaturamento({ tenant, onChange, showToast }: { tenant: Tenant | null; onChange: () => Promise<void>; showToast: (t: ToastData) => void }) {
+  const [doc, setDoc] = useState(String((tenant as any)?.cnpj ?? ''));
+  const [responsavel, setResponsavel] = useState(String((tenant as any)?.responsavel ?? ''));
+  const [telefone, setTelefone] = useState(String((tenant as any)?.telefone ?? ''));
+  const [busy, setBusy] = useState(false);
+
+  const digitos = soDigitos(doc);
+  // Valida o DÍGITO VERIFICADOR, não só o tamanho: foi um CNPJ com um número a
+  // menos que travou a cobrança de um cliente sem ninguém perceber.
+  const docOk = validaCpfCnpj(doc);
+  const tipoDoc = digitos.length === 11 ? 'CPF' : digitos.length === 14 ? 'CNPJ' : null;
+
+  const salvar = async () => {
+    if (!docOk) {
+      return showToast({
+        title: 'CPF/CNPJ inválido',
+        msg: digitos.length === 11 || digitos.length === 14
+          ? 'Os dígitos verificadores não conferem. Confira o número.'
+          : `Informe 11 dígitos (CPF) ou 14 (CNPJ). Você digitou ${digitos.length}.`,
+        kind: 'err',
+      });
+    }
+    setBusy(true);
+    try {
+      await apiPatch('/clinic', { cnpj: doc.trim(), responsavel: responsavel.trim(), telefone: telefone.trim() });
+      await onChange();
+      showToast({ title: 'Dados salvos', msg: 'As próximas cobranças usarão estes dados.', kind: 'ok' });
+    } catch (e) {
+      showToast({ title: 'Falha ao salvar', msg: (e as Error).message, kind: 'err' });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Card style={{ padding: 24 }}>
+      <div style={{ color: 'var(--c-ink)', fontSize: 16, fontWeight: 700 }}>Dados de faturamento</div>
+      <div style={{ color: 'var(--c-ink3)', fontSize: 13, marginTop: 4 }}>
+        Usados para emitir as cobranças (PIX, boleto e cartão). Mantenha o CPF/CNPJ correto — sem ele não conseguimos gerar o pagamento.
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 16, marginTop: 20 }}>
+        <div>
+          <label className="ia-label">CPF ou CNPJ *</label>
+          <input
+            value={doc}
+            onChange={(e) => setDoc(mascaraCpfCnpj(e.target.value))}
+            className="ia-input"
+            placeholder="00.000.000/0000-00"
+            style={{ borderColor: doc && !docOk ? 'var(--c-err)' : undefined }}
+          />
+          <div style={{ fontSize: 12, marginTop: 5, color: !doc ? 'var(--c-ink3)' : docOk ? 'var(--c-okfg)' : 'var(--c-err)' }}>
+            {!doc ? 'Obrigatório para emitir cobrança.'
+              : docOk ? `${tipoDoc} válido.`
+              : digitos.length === 11 || digitos.length === 14 ? 'Dígitos verificadores não conferem.'
+              : `${digitos.length} dígito(s) — precisa ter 11 (CPF) ou 14 (CNPJ).`}
+          </div>
+        </div>
+        <div>
+          <label className="ia-label">Responsável</label>
+          <input value={responsavel} onChange={(e) => setResponsavel(e.target.value)} className="ia-input" placeholder="Nome de quem responde pela conta" />
+        </div>
+        <div>
+          <label className="ia-label">Telefone / WhatsApp</label>
+          <input value={telefone} onChange={(e) => setTelefone(e.target.value)} className="ia-input" placeholder="(11) 99876-5432" />
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 22 }}>
+        <button onClick={salvar} disabled={busy || !docOk} className="ia-btn" style={{ padding: '11px 22px', fontSize: 14 }}>
+          {busy ? 'Salvando…' : 'Salvar'}
+        </button>
+      </div>
+    </Card>
+  );
+}
 
 function Custos({ tenant, onChange, showToast }: { tenant: Tenant | null; onChange: () => Promise<void>; showToast: (t: ToastData) => void }) {
   const [salario, setSalario] = useState(String(numOr(tenant?.salario_bruto_medio, 3000)));

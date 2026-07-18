@@ -284,6 +284,22 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
       patch.cadastros_dia_funcionario = Math.round(val);
     }
 
+    // DADOS CADASTRAIS (faturamento). O CPF/CNPJ é exigido pelo Asaas para
+    // emitir cobrança — sem poder editar aqui, um documento errado travava o
+    // cliente e só o suporte conseguia corrigir.
+    if (body.cnpj !== undefined) {
+      const digitos = String(body.cnpj ?? '').replace(/\D/g, '');
+      if (digitos && digitos.length !== 11 && digitos.length !== 14) {
+        return reply.code(400).send({
+          error: 'CPF/CNPJ inválido: informe 11 dígitos (CPF) ou 14 (CNPJ). Confira se não falta ou sobra algum número.',
+        });
+      }
+      patch.cnpj = String(body.cnpj ?? '').trim() || null;
+    }
+    for (const campo of ['responsavel', 'telefone'] as const) {
+      if (body[campo] !== undefined) patch[campo] = String(body[campo] ?? '').trim() || null;
+    }
+
     if (Object.keys(patch).length === 0) {
       return reply.code(400).send({ error: 'Nada para atualizar.' });
     }
@@ -294,6 +310,15 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
       .eq('id', req.tenant!.id)
       .select('*')
       .single();
+
+    if (error) return reply.code(400).send({ error: error.message });
+
+    // Documento mudou → o cadastro no Asaas ficou defasado. Zera o vínculo para
+    // que a próxima cobrança recrie o cliente com o dado correto (o Asaas casa
+    // pagamento por esse id; manter o antigo cobraria com o documento errado).
+    if (body.cnpj !== undefined) {
+      await (supabaseAdmin as any).from('tenants').update({ asaas_customer_id: null }).eq('id', req.tenant!.id);
+    }
 
     return data;
   });
