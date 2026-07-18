@@ -39,7 +39,7 @@ export async function aplicarCancelamentosVencidos(tenantId: number): Promise<vo
 export async function montarPlano(tenantId: number) {
   const { data: tenant } = await supabaseAdmin
     .from('tenants')
-    .select('id, name, valor_terminal, valor_implantacao, implantacao_paga')
+    .select('id, name, valor_terminal, valor_implantacao, implantacao_paga, isento_pagamento')
     .eq('id', tenantId)
     .maybeSingle();
   if (!tenant) return null;
@@ -95,6 +95,8 @@ export async function montarPlano(tenantId: number) {
     valor_terminal: precoTerminalNaPosicao(precos, 1), // preço base (1º terminal) p/ referência
     valor_implantacao: valorImplantacao,
     implantacao_paga: tenant.implantacao_paga,
+    // true = parceiro/teste: usa a automação sem pagar.
+    isento_pagamento: (tenant as any).isento_pagamento ?? false,
     precos, // tabela de preços vigente
     proximo_terminal: precoTerminalNaPosicao(precos, totalTerminais + 1), // quanto custa o próximo
     empresas: empresasOut,

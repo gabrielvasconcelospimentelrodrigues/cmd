@@ -473,14 +473,70 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/admin/tenants/:id/plano', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
-    const body = (req.body ?? {}) as { valor_terminal?: number; valor_implantacao?: number; implantacao_paga?: boolean };
+    const body = (req.body ?? {}) as { valor_terminal?: number; valor_implantacao?: number; implantacao_paga?: boolean; isento_pagamento?: boolean };
     const patch: Record<string, unknown> = {};
     if (body.valor_terminal !== undefined) patch.valor_terminal = Number(body.valor_terminal);
     if (body.valor_implantacao !== undefined) patch.valor_implantacao = Number(body.valor_implantacao);
     if (typeof body.implantacao_paga === 'boolean') patch.implantacao_paga = body.implantacao_paga;
+    // ISENÇÃO: parceiro / conta de teste / cortesia — roda automação sem pagar.
+    // Fica no mesmo endpoint do plano porque é uma decisão comercial, e é
+    // auditada à parte por ser a única forma de usar o sistema sem cobrança.
+    if (typeof body.isento_pagamento === 'boolean') patch.isento_pagamento = body.isento_pagamento;
     if (Object.keys(patch).length === 0) return reply.code(400).send({ error: 'nada para atualizar.' });
     const { error } = await supabaseAdmin.from('tenants').update(patch as Database['public']['Tables']['tenants']['Update']).eq('id', id);
     if (error) { req.log.error(error); return reply.code(500).send({ error: 'falha ao atualizar o plano.' }); }
+
+    if (typeof body.isento_pagamento === 'boolean') {
+      const { data: t } = await (supabaseAdmin as any).from('tenants').select('name').eq('id', id).maybeSingle();
+      await registrarLog({
+        tenantId: id, categoria: 'financeiro',
+        acao: body.isento_pagamento ? 'assinante.isentado' : 'assinante.isencao_removida',
+        nivel: 'alerta', ator: ator(req),
+        descricao: body.isento_pagamento
+          ? `${atorNome(req)} ISENTOU ${t?.name ?? 'o assinante'} de pagamento — passa a usar a automação sem cobrança.`
+          : `${atorNome(req)} removeu a isenção de ${t?.name ?? 'o assinante'} — volta a depender de pagamento.`,
+        meta: { isento: body.isento_pagamento },
+      });
+    }
+    return (await montarPlano(id)) ?? {};
+  });
+
+  /**
+   * Atrela terminais direto ao assinante (sem cobrança), para conta de TESTE ou
+   * PARCEIRO. Diferente de aprovar um pedido: aqui não existe pedido nem
+   * fatura — é concessão do super admin.
+   */
+  app.post('/admin/tenants/:id/terminais', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+    const body = (req.body ?? {}) as { quantidade?: number; empresa_id?: number };
+    const qtd = Math.trunc(Number(body.quantidade ?? 0));
+    if (!qtd || Math.abs(qtd) > 50) return reply.code(400).send({ error: 'Informe uma quantidade entre -50 e 50 (negativo remove).' });
+
+    // Empresa alvo: a informada ou a 1ª do assinante.
+    let empresaId = body.empresa_id ? Number(body.empresa_id) : null;
+    const { data: emps } = await (supabaseAdmin as any)
+      .from('empresas').select('id, nome, terminais_contratados').eq('tenant_id', id).order('id', { ascending: true });
+    if (!emps?.length) return reply.code(400).send({ error: 'Assinante não tem empresa para alocar o terminal.' });
+    const alvo = empresaId ? emps.find((e: any) => e.id === empresaId) : emps[0];
+    if (!alvo) return reply.code(400).send({ error: 'Empresa não pertence a este assinante.' });
+
+    // Nunca deixa negativo — um contador negativo quebraria o cálculo de preço
+    // e o limite de terminais em paralelo.
+    const novoEmp = Math.max(0, Number(alvo.terminais_contratados ?? 0) + qtd);
+    const { data: t } = await (supabaseAdmin as any).from('tenants').select('name, max_terminais').eq('id', id).maybeSingle();
+    const novoMax = Math.max(0, Number(t?.max_terminais ?? 0) + qtd);
+
+    await (supabaseAdmin as any).from('empresas').update({ terminais_contratados: novoEmp }).eq('id', alvo.id);
+    await (supabaseAdmin as any).from('tenants').update({ max_terminais: novoMax }).eq('id', id);
+
+    await registrarLog({
+      tenantId: id, categoria: 'terminal', acao: qtd > 0 ? 'terminal.concedido' : 'terminal.removido',
+      nivel: 'alerta', ator: ator(req),
+      descricao: `${atorNome(req)} ${qtd > 0 ? 'concedeu' : 'removeu'} ${Math.abs(qtd)} terminal(is) de ${alvo.nome} (${t?.name ?? ''}) SEM cobrança — agora ${novoEmp}.`,
+      meta: { empresa_id: alvo.id, quantidade: qtd, total_empresa: novoEmp, total_assinante: novoMax },
+    });
+
     return (await montarPlano(id)) ?? {};
   });
 

@@ -1547,7 +1547,7 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
   const [plano, setPlano] = useState<Plano | null>(null);
   const [loading, setLoading] = useState(false);
   const [faturas, setFaturas] = useState<Fatura[]>([]);
-  const [busy, setBusy] = useState<number | 'gerar' | null>(null);
+  const [busy, setBusy] = useState<number | 'gerar' | 'terminais' | null>(null);
 
   const carregarFaturas = useCallback(async (id: number) => {
     try { setFaturas(await apiGet<Fatura[]>(`/admin/tenants/${id}/faturas`)); } catch { setFaturas([]); }
@@ -1583,6 +1583,19 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
       await apiPost(`/admin/faturas/${f.id}/${pago ? 'baixa' : 'reabrir'}`, {});
       if (sel) await carregarFaturas(sel);
       showToast({ title: pago ? 'Baixa registrada' : 'Fatura reaberta', msg: '', kind: 'ok' });
+    } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); } finally { setBusy(null); }
+  };
+
+  /** Concede/remove terminais sem gerar fatura (conta de teste ou parceiro). */
+  const concederTerminais = async (quantidade: number) => {
+    if (!sel) return;
+    const acao = quantidade > 0 ? `Conceder ${quantidade} terminal(is)` : 'Remover 1 terminal';
+    if (!window.confirm(`${acao} SEM cobrança para este assinante?`)) return;
+    setBusy('terminais');
+    try {
+      await apiPost(`/admin/tenants/${sel}/terminais`, { quantidade });
+      await abrir(sel);
+      showToast({ title: quantidade > 0 ? 'Terminais concedidos' : 'Terminal removido', msg: 'Sem cobrança.', kind: 'ok' });
     } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); } finally { setBusy(null); }
   };
 
@@ -1628,6 +1641,37 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
                 <span style={{ color: 'var(--c-ink2)', fontSize: 13 }}>Implantação ({brl(plano.valor_implantacao)}) paga</span>
                 <Switch on={plano.implantacao_paga} onClick={() => patchTenant({ implantacao_paga: !plano.implantacao_paga })} />
                 <span style={{ fontSize: 12, color: plano.implantacao_paga ? 'var(--c-okfg)' : 'var(--c-warnfg)' }}>{plano.implantacao_paga ? 'paga' : 'pendente'}</span>
+              </div>
+
+              {/* ISENÇÃO: conta de teste / parceiro. Roda automação sem pagar —
+                  por isso fica destacado, para não passar despercebido numa
+                  conta que deveria estar cobrando. */}
+              <div style={{ marginTop: 16, padding: '13px 15px', borderRadius: 10, background: (plano as any).isento_pagamento ? 'var(--c-warnsoft)' : 'var(--c-surface2)', border: `1px solid ${(plano as any).isento_pagamento ? 'var(--c-warn)' : 'var(--c-border)'}` }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ color: 'var(--c-ink2)', fontSize: 13, fontWeight: 600 }}>Isento de pagamento (teste / parceiro)</span>
+                  <Switch on={!!(plano as any).isento_pagamento} onClick={() => patchTenant({ isento_pagamento: !(plano as any).isento_pagamento })} />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: (plano as any).isento_pagamento ? 'var(--c-warnfg)' : 'var(--c-ink3)' }}>
+                    {(plano as any).isento_pagamento ? 'ISENTO — usa sem pagar' : 'cobrança normal'}
+                  </span>
+                </div>
+                <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>
+                  Ligado, o assinante roda a automação <b>sem nenhuma cobrança</b> — ignora implantação, mensalidade e faturas vencidas. Use só para conta de teste ou parceiro.
+                </div>
+              </div>
+
+              {/* Concede terminais sem cobrar — para teste/parceiro, já que o
+                  caminho normal (cliente contrata e paga) não se aplica a eles. */}
+              <div style={{ marginTop: 12, padding: '13px 15px', borderRadius: 10, background: 'var(--c-surface2)', border: '1px solid var(--c-border)' }}>
+                <div style={{ color: 'var(--c-ink2)', fontSize: 13, fontWeight: 600 }}>Atrelar terminais sem cobrança</div>
+                <div style={{ color: 'var(--c-ink3)', fontSize: 12, margin: '5px 0 10px', lineHeight: 1.5 }}>
+                  Concede terminais direto, sem gerar fatura. Hoje: <b>{plano.total_terminais}</b>.
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {[1, 2, 3].map((n) => (
+                    <button key={n} onClick={() => concederTerminais(n)} disabled={busy === 'terminais'} className="ia-btn-outline" style={{ padding: '0 14px', height: 32, fontSize: 13 }}>+{n}</button>
+                  ))}
+                  <button onClick={() => concederTerminais(-1)} disabled={busy === 'terminais' || plano.total_terminais <= 0} className="ia-btn-outline" style={{ padding: '0 14px', height: 32, fontSize: 13, color: 'var(--c-errfg)' }}>−1</button>
+                </div>
               </div>
             </Card>
 
