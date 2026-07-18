@@ -41,11 +41,28 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
   const solicitarTerminal = async (empresaId: number) => {
     setSolicitando(true);
     try {
-      await apiPost('/terminal-requests', { empresa_id: empresaId });
+      // O contrato já nasce com a cobrança: leva o cliente direto ao pagamento.
+      // O terminal é liberado sozinho quando o Asaas confirma (webhook).
+      const r = await apiPost<{ link_pagamento: string | null; valor: number; erro_cobranca: string | null }>(
+        '/terminal-requests', { empresa_id: empresaId },
+      );
       setConfirmar(null);
       await carregar();
       if (onChange) await onChange();
-      showToast({ title: 'Solicitação enviada', msg: 'Aguarde a liberação do administrador.', kind: 'ok' });
+
+      if (r.link_pagamento) {
+        // Nova aba: abrir na mesma perderia o painel. Se o navegador bloquear o
+        // popup, o botão "Pagar" na lista de faturas continua disponível.
+        window.open(r.link_pagamento, '_blank', 'noopener,noreferrer');
+        showToast({ title: 'Terminal contratado', msg: 'Conclua o pagamento na aba aberta — o terminal libera automaticamente.', kind: 'ok' });
+      } else {
+        // Sem link não há como pagar: avisa de verdade em vez de fingir sucesso.
+        showToast({
+          title: 'Contratado, mas sem cobrança',
+          msg: r.erro_cobranca || 'Não foi possível emitir a cobrança. Fale com o suporte.',
+          kind: 'err',
+        });
+      }
     } catch (e) {
       showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' });
     } finally {
@@ -156,7 +173,7 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
                     className="ia-btn"
                     style={{ padding: '8px 14px', fontSize: 13 }}
                   >
-                    {temPendente ? 'Aguardando liberação' : solicitando ? 'Solicitando...' : 'Contratar Novo Terminal'}
+                    {temPendente ? 'Aguardando pagamento' : solicitando ? 'Gerando cobrança...' : 'Contratar Novo Terminal'}
                   </button>
                 </div>
               </div>
@@ -182,7 +199,7 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
                           color: r.status === 'approved' ? 'var(--c-okfg)' : r.status === 'rejected' ? 'var(--c-err)' : 'var(--c-warnfg)',
                           fontSize: 12
                         }}>
-                          {r.status === 'approved' ? 'Aprovada (Liberada)' : r.status === 'rejected' ? 'Recusada' : 'Pendente de liberação'}
+                          {r.status === 'approved' ? 'Liberado' : r.status === 'rejected' ? 'Recusada' : 'Aguardando pagamento'}
                         </span>
                       </div>
                     ))}
@@ -357,10 +374,13 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
             <div style={{ background: 'var(--c-surface2)', borderRadius: 10, padding: '10px 14px', marginTop: 14, fontSize: 13, color: 'var(--c-ink3)' }}>
               Mensalidade atual <b style={{ color: 'var(--c-ink2)' }}>{brl(plano.mensal)}</b> → depois <b style={{ color: 'var(--c-softfg)' }}>{brl(plano.mensal + (plano.proximo_terminal ?? plano.valor_terminal))}</b>
             </div>
-            <p style={{ color: 'var(--c-ink3)', fontSize: 12.5, margin: '12px 0 0' }}>A solicitação vai para o administrador aprovar.</p>
+            <p style={{ color: 'var(--c-ink3)', fontSize: 12.5, margin: '12px 0 0', lineHeight: 1.55 }}>
+              Ao confirmar, abrimos o <b>pagamento do valor proporcional</b> (só os dias que faltam neste mês).
+              Assim que o pagamento for aprovado, o terminal é <b>liberado automaticamente</b>.
+            </p>
             <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
               <button onClick={() => setConfirmar(null)} className="ia-btn-outline" style={{ flex: 1 }}>Cancelar</button>
-              <button onClick={() => solicitarTerminal(confirmar.id)} disabled={solicitando} className="ia-btn" style={{ flex: 1, padding: 12 }}>{solicitando ? 'Enviando…' : 'Confirmar contratação'}</button>
+              <button onClick={() => solicitarTerminal(confirmar.id)} disabled={solicitando} className="ia-btn" style={{ flex: 1, padding: 12 }}>{solicitando ? 'Gerando cobrança…' : 'Contratar e pagar'}</button>
             </div>
           </div>
         </div>

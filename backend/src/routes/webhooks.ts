@@ -10,6 +10,7 @@ import type { FastifyInstance } from 'fastify';
 import { supabaseAdmin } from '../lib/supabase';
 import { env } from '../config/env';
 import { registrarLog } from '../lib/audit';
+import { liberarTerminal } from '../lib/terminais';
 
 /** A baixa não tem um usuário por trás — quem agiu foi o gateway. */
 const ATOR_ASAAS = { usuario_id: null, actor_nome: 'Asaas (automático)', actor_email: null, actor_role: 'sistema' };
@@ -37,7 +38,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
     // devolver erro faria o Asaas reenviar o evento indefinidamente.
     const { data: fatura } = await (supabaseAdmin as any)
       .from('faturas')
-      .select('id, tenant_id, status, valor, descricao, tipo')
+      .select('id, tenant_id, status, valor, descricao, tipo, terminal_request_id')
       .eq('asaas_payment_id', pagamentoId)
       .maybeSingle();
 
@@ -66,6 +67,23 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
         descricao: `Pagamento confirmado pelo Asaas — baixa automática da fatura "${fatura.descricao || fatura.tipo}" (R$ ${Number(fatura.valor).toFixed(2)}).`,
         meta: { fatura_id: fatura.id, asaas_payment_id: pagamentoId, evento },
       });
+
+      // ENTREGA O QUE FOI PAGO. É o que fecha o autoatendimento: o cliente
+      // contratou o terminal, pagou, e ele passa a valer sem ninguém aprovar.
+      if (fatura.terminal_request_id) {
+        const liberou = await liberarTerminal(fatura.terminal_request_id, `pagamento da fatura #${fatura.id}`);
+        if (liberou) {
+          await registrarLog({
+            tenantId: fatura.tenant_id,
+            categoria: 'terminal',
+            acao: 'terminal.liberado_pagamento',
+            nivel: 'sucesso',
+            ator: ATOR_ASAAS,
+            descricao: 'Terminal liberado automaticamente após a confirmação do pagamento.',
+            meta: { fatura_id: fatura.id, terminal_request_id: fatura.terminal_request_id },
+          });
+        }
+      }
 
       req.log.info(`[asaas] fatura #${fatura.id} baixada por ${evento}.`);
       return { ok: true, baixada: fatura.id };

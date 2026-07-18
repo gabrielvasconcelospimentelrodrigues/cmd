@@ -3,6 +3,10 @@ import { supabaseAdmin } from '../lib/supabase';
 import { encrypt } from '../lib/crypto';
 import { registrarLog, ator, atorNome } from '../lib/audit';
 import { verificarAcessoAutomacao } from '../lib/acesso';
+import { calcularProporcionalProximoTerminal } from '../lib/terminais';
+import { criarCobrancaAsaas } from '../lib/asaas';
+
+const brl = (v: number) => `R$ ${Number(v).toFixed(2).replace('.', ',')}`;
 import type { Database } from '../types/database';
 
 // Colunas seguras de clinic_accounts devolvidas ao cliente (sem cifras).
@@ -347,11 +351,40 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
       req.log.error(error);
       return reply.code(500).send({ error: 'Falha ao criar solicitação de terminal.' });
     }
+
+    // AUTOATENDIMENTO: já emite a cobrança do proporcional. O terminal é
+    // liberado pelo webhook quando o pagamento entra — o cliente resolve tudo
+    // sozinho, sem esperar aprovação. (O super admin ainda pode liberar na mão
+    // pelo painel dele, para cortesia.)
+    const prop = await calcularProporcionalProximoTerminal(req.tenant!.id);
+    const { data: fatura } = await (supabaseAdmin as any).from('faturas').insert({
+      tenant_id: req.tenant!.id,
+      empresa_id: empresaId,
+      tipo: 'terminal_proporcional',
+      descricao: prop.descricao,
+      referencia: prop.referencia,
+      valor: prop.valor,
+      vencimento: prop.vencimento,
+      status: 'aberto',
+      terminal_request_id: data.id, // é por aqui que o webhook sabe o que liberar
+    }).select('*').single();
+
+    const cobranca = fatura ? await criarCobrancaAsaas(fatura) : null;
+
     await registrarLog({
       tenantId: req.tenant!.id, categoria: 'terminal', acao: 'terminal.solicitado', nivel: 'info', ator: ator(req),
-      descricao: `${atorNome(req)} solicitou um novo terminal (aguardando aprovação do super admin).`,
-      meta: { empresa_id: empresaId },
+      descricao: `${atorNome(req)} contratou um novo terminal (${brl(prop.valor)} proporcional)${cobranca ? ' — cobrança emitida, liberação automática após o pagamento' : ' — falha ao emitir a cobrança'}.`,
+      meta: { empresa_id: empresaId, fatura_id: fatura?.id ?? null, valor: prop.valor },
     });
-    return reply.code(201).send(data);
+
+    return reply.code(201).send({
+      ...data,
+      fatura_id: fatura?.id ?? null,
+      valor: prop.valor,
+      link_pagamento: cobranca?.link_pagamento ?? null,
+      // Sem link o cliente não tem como pagar — o front avisa em vez de fingir
+      // que deu certo (ex.: CPF/CNPJ do assinante inválido no Asaas).
+      erro_cobranca: cobranca ? null : (fatura?.erro_cobranca ?? 'Não foi possível emitir a cobrança.'),
+    });
   });
 }

@@ -7,6 +7,7 @@ import { registrarLog, ator, atorNome } from '../lib/audit';
 import { getPrecos, precoTerminalNaPosicao, type Precos } from '../lib/precos';
 import { getMotorConfig, type MotorConfig } from '../lib/motor-config';
 import { criarCobrancaAsaas } from '../lib/asaas';
+import { liberarTerminal } from '../lib/terminais';
 import type { Database } from '../types/database';
 
 const brl = (v: number | string) =>
@@ -1056,57 +1057,33 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       empresaId = emp.id;
     }
 
-    // +1 TERMINAL na empresa = +1 funcionário = +R$ (valor_terminal) na mensalidade.
-    const { data: empAtual } = await supabaseAdmin
-      .from('empresas').select('terminais_contratados').eq('id', empresaId).maybeSingle();
-    const atual = Number((empAtual as { terminais_contratados?: number } | null)?.terminais_contratados ?? 0);
-    await supabaseAdmin
-      .from('empresas')
-      .update({ terminais_contratados: atual + 1 } as Database['public']['Tables']['empresas']['Update'])
-      .eq('id', empresaId);
+    // LIBERAÇÃO MANUAL (cortesia / cliente que pagou por fora). Usa a MESMA
+    // função do webhook: ela é idempotente, então se o pagamento entrar ao
+    // mesmo tempo em que você aprova, o terminal é creditado UMA vez só.
+    const liberou = await liberarTerminal(id, `aprovação manual de ${atorNome(req)}`);
+    if (!liberou) return reply.code(409).send({ error: 'Solicitação já foi resolvida (possivelmente pelo pagamento).' });
 
-    // Mantém também o teto do assinante coerente (cota total).
-    const { data: tenant } = await supabaseAdmin.from('tenants').select('max_terminais, valor_terminal').eq('id', tenantId).maybeSingle();
-    await supabaseAdmin
-      .from('tenants')
-      .update({ max_terminais: Number((tenant as any)?.max_terminais ?? 0) + 1 } as any)
-      .eq('id', tenantId);
-
-    // COBRANÇA PROPORCIONAL com PREÇO ESCALONADO: o valor é o do terminal na
-    // sua POSIÇÃO (o total já foi incrementado acima, então este é o último).
-    const precos = await getPrecos();
-    const { data: empsTot } = await supabaseAdmin.from('empresas').select('terminais_contratados').eq('tenant_id', tenantId);
-    const totalContratados = (empsTot ?? []).reduce((s, e) => s + Number((e as { terminais_contratados?: number }).terminais_contratados ?? 0), 0);
-    const valorTerminal = precoTerminalNaPosicao(precos, totalContratados);
-    const hoje = new Date();
-    const ano = hoje.getFullYear();
-    const mes = hoje.getMonth();
-    const diasNoMes = new Date(ano, mes + 1, 0).getDate();
-    const diaAtual = hoje.getDate();
-    const diasRestantes = diasNoMes - diaAtual + 1;
-    const proporcional = Math.round(valorTerminal * (diasRestantes / diasNoMes) * 100) / 100;
-    const referencia = `${ano}-${String(mes + 1).padStart(2, '0')}`;
-    const vencimento = new Date(ano, mes, Math.min(diaAtual + 5, diasNoMes)).toISOString().slice(0, 10);
-    const { data: fatProporcional } = await (supabaseAdmin as any).from('faturas').insert({
-      tenant_id: tenantId, empresa_id: empresaId, tipo: 'terminal_proporcional',
-      descricao: `Novo terminal — proporcional (${diasRestantes}/${diasNoMes} dias de ${referencia})`,
-      referencia, valor: proporcional, vencimento, status: 'aberto',
-    }).select('*').single();
-    // Emite a cobrança (não lança — ver lib/asaas.ts).
-    if (fatProporcional) await criarCobrancaAsaas(fatProporcional);
+    // A cobrança do proporcional JÁ nasce junto com o pedido (autoatendimento),
+    // então aqui NÃO emitimos outra — seria cobrar duas vezes pelo mesmo
+    // terminal. Aprovar manualmente é liberar sem esperar o pagamento; a fatura
+    // existente segue em aberto (ou já paga, se o cliente pagou antes).
+    const { data: fatDoPedido } = await (supabaseAdmin as any)
+      .from('faturas')
+      .select('id, valor, status')
+      .eq('terminal_request_id', id)
+      .maybeSingle();
 
     const { data: updated } = await (supabaseAdmin as any)
-      .from('terminal_requests')
-      .update({ status: 'approved', resolved_at: new Date().toISOString() })
-      .eq('id', id)
-      .select('*')
-      .single();
+      .from('terminal_requests').select('*').eq('id', id).single();
 
     const { data: empNome } = await supabaseAdmin.from('empresas').select('nome').eq('id', empresaId).maybeSingle();
+    const infoFatura = fatDoPedido
+      ? ` (fatura #${fatDoPedido.id} de ${brl(Number(fatDoPedido.valor))} — ${fatDoPedido.status})`
+      : ' (sem fatura vinculada — pedido anterior ao autoatendimento)';
     await registrarLog({
       tenantId, categoria: 'terminal', acao: 'terminal.aprovado', nivel: 'sucesso', ator: ator(req),
-      descricao: `${atorNome(req)} aprovou +1 terminal para ${empNome?.nome ?? 'a empresa'} (proporcional ${brl(proporcional)}, +${brl(valorTerminal)}/mês).`,
-      meta: { empresa_id: empresaId, proporcional, valor_terminal: valorTerminal },
+      descricao: `${atorNome(req)} liberou +1 terminal para ${empNome?.nome ?? 'a empresa'}${infoFatura}.`,
+      meta: { empresa_id: empresaId, fatura_id: fatDoPedido?.id ?? null },
     });
     return updated;
   });
