@@ -849,9 +849,6 @@ function FormCartao({ fatura, onPago }: { fatura: { id: number; valor: number };
   const [t, setT] = useState({ name: '', email: '', cpfCnpj: '', postalCode: '', addressNumber: '', phone: '' });
   const [busy, setBusy] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-  // Recorrência ligada por padrão: é o motivo de o cartão ser a forma
-  // preferida. O cliente pode desmarcar e pagar só desta vez.
-  const [recorrente, setRecorrente] = useState(true);
 
   const numeroFmt = (v: string) => v.replace(/\D/g, '').slice(0, 16).replace(/(\d{4})(?=\d)/g, '$1 ').trim();
   const validadeFmt = (v: string) => {
@@ -869,7 +866,6 @@ function FormCartao({ fatura, onPago }: { fatura: { id: number; valor: number };
       await apiPost(`/minhas-faturas/${fatura.id}/cartao`, {
         cartao: { holderName: c.holderName, number: c.number.replace(/\s/g, ''), expiryMonth: mes, expiryYear: ano, ccv: c.ccv },
         titular: t,
-        assinar: recorrente,
       });
       // Some com os dados da memória assim que a cobrança é aceita.
       setC({ holderName: '', number: '', expiry: '', ccv: '' });
@@ -906,14 +902,6 @@ function FormCartao({ fatura, onPago }: { fatura: { id: number; valor: number };
         {campo(t.phone, (v) => setT({ ...t, phone: v }), 'Telefone (opcional)')}
       </div>
 
-      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, marginTop: 14, padding: '11px 13px', borderRadius: 10, background: recorrente ? 'var(--c-soft)' : 'var(--c-surface2)', border: `1px solid ${recorrente ? 'var(--c-blue)' : 'var(--c-border)'}`, cursor: 'pointer' }}>
-        <input type="checkbox" checked={recorrente} onChange={(e) => setRecorrente(e.target.checked)} style={{ marginTop: 2, accentColor: 'var(--c-blued)' }} />
-        <span style={{ fontSize: 12.5, color: 'var(--c-ink2)', lineHeight: 1.5 }}>
-          <b>Renovar automaticamente todo mês</b><br />
-          <span style={{ color: 'var(--c-ink3)' }}>Sua mensalidade é cobrada neste cartão e o acesso nunca é interrompido por esquecimento. Cancele quando quiser.</span>
-        </span>
-      </label>
-
       {erro && (
         <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8, background: 'var(--c-errsoft)', color: 'var(--c-errfg)', fontSize: 12.5, lineHeight: 1.45 }}>{erro}</div>
       )}
@@ -921,8 +909,11 @@ function FormCartao({ fatura, onPago }: { fatura: { id: number; valor: number };
       <button onClick={pagar} disabled={busy} className="ia-btn" style={{ width: '100%', marginTop: 12, padding: 12, fontSize: 14 }}>
         {busy ? 'Processando…' : `Pagar ${brl(fatura.valor)}`}
       </button>
-      <div style={{ color: 'var(--c-ink3)', fontSize: 11.5, marginTop: 9, textAlign: 'center', lineHeight: 1.5 }}>
+      <div style={{ color: 'var(--c-ink3)', fontSize: 11.5, marginTop: 9, textAlign: 'center', lineHeight: 1.55 }}>
         Aprovação na hora — libera o acesso imediatamente.<br />
+        {/* A renovação é parte do plano (não é opcional). Informamos só o que o
+            cliente precisa saber: que não fica preso. */}
+        Renovação mensal neste cartão — <b style={{ color: 'var(--c-ink2)' }}>cancele quando quiser</b>.<br />
         Pagamento processado pelo Asaas. Não guardamos os dados do seu cartão.
       </div>
     </div>

@@ -234,12 +234,13 @@ export async function empresaRoutes(app: FastifyInstance): Promise<void> {
 
     if (!r.ok) return reply.code(400).send({ error: r.erro });
 
-    // RECORRÊNCIA: com o cartão aprovado, deixa a mensalidade no automático.
-    // Só faz sentido para a mensalidade — proporcional de terminal é cobrança
-    // única. Falhar aqui NÃO invalida o pagamento que já foi aprovado: o
-    // cliente pagou, o acesso libera, e a recorrência pode ser reativada depois.
+    // RECORRÊNCIA: parte do plano, não opção — pagar no cartão deixa a
+    // mensalidade no automático. Só vale para a mensalidade; proporcional de
+    // terminal é cobrança única e não deve recorrer.
+    // Falhar aqui NÃO invalida o pagamento já aprovado: o cliente pagou, o
+    // acesso libera, e a recorrência pode ser refeita depois.
     let recorrencia: { ativa: boolean; erro?: string } = { ativa: false };
-    if (b.assinar !== false && f.tipo === 'mensalidade') {
+    if (f.tipo === 'mensalidade') {
       const plano = await montarPlano(req.tenant!.id);
       const mensal = Number(plano?.mensal ?? 0);
       if (mensal > 0) {
