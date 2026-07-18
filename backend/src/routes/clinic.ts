@@ -385,7 +385,8 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
     const { data: fatura } = await (supabaseAdmin as any).from('faturas').insert({
       tenant_id: req.tenant!.id,
       empresa_id: empresaId,
-      tipo: 'terminal_proporcional',
+      // 1º terminal é a mensalidade de entrada (cheia), não um acréscimo.
+      tipo: prop.primeiro ? 'mensalidade' : 'terminal_proporcional',
       descricao: prop.descricao,
       referencia: prop.referencia,
       valor: prop.valor,

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { supabaseAdmin } from '../lib/supabase';
 import { registrarLog, ator, atorNome } from '../lib/audit';
 import { getPrecos, precoTerminalNaPosicao } from '../lib/precos';
-import { pixDaCobranca } from '../lib/asaas';
+import { pixDaCobranca, boletoDaCobranca, pagarComCartao } from '../lib/asaas';
 
 /**
  * Monta o resumo do PLANO de um assinante (tenant):
@@ -166,6 +166,75 @@ export async function empresaRoutes(app: FastifyInstance): Promise<void> {
       // Boleto e cartão seguem na página do Asaas.
       link_pagamento: f.link_pagamento,
     };
+  });
+
+  /** Boleto: linha digitável e código de barras, para copiar sem sair do painel. */
+  app.get('/minhas-faturas/:id/boleto', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+    const { data: f } = await (supabaseAdmin as any)
+      .from('faturas').select('id, status, asaas_payment_id, link_pagamento')
+      .eq('id', id).eq('tenant_id', req.tenant!.id).maybeSingle();
+    if (!f) return reply.code(404).send({ error: 'Fatura não encontrada.' });
+    if (f.status === 'pago') return { pago: true };
+    if (!f.asaas_payment_id) return reply.code(409).send({ error: 'Cobrança ainda não emitida.' });
+
+    const b = await boletoDaCobranca(f.asaas_payment_id);
+    if (!b) return reply.code(502).send({ error: 'Não foi possível gerar o boleto agora.', link_pagamento: f.link_pagamento });
+    return { pago: false, linha_digitavel: b.identificationField, codigo_barras: b.barCode, link_pagamento: f.link_pagamento };
+  });
+
+  /**
+   * CARTÃO — checkout transparente.
+   *
+   * ⚠️ Os dados do cartão só passam por aqui a caminho do Asaas: não são
+   * gravados, não entram em log e não voltam na resposta. Por isso a rota
+   * devolve apenas ok/erro.
+   */
+  app.post('/minhas-faturas/:id/cartao', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+
+    const { data: f } = await (supabaseAdmin as any)
+      .from('faturas').select('id, status, valor, asaas_payment_id')
+      .eq('id', id).eq('tenant_id', req.tenant!.id).maybeSingle();
+    if (!f) return reply.code(404).send({ error: 'Fatura não encontrada.' });
+    if (f.status === 'pago') return { ok: true, ja_pago: true };
+    if (!f.asaas_payment_id) return reply.code(409).send({ error: 'Cobrança ainda não emitida.' });
+
+    const b = (req.body ?? {}) as any;
+    const c = b.cartao ?? {};
+    const t = b.titular ?? {};
+    const faltando = ['holderName', 'number', 'expiryMonth', 'expiryYear', 'ccv'].filter((k) => !String(c[k] ?? '').trim());
+    if (faltando.length) return reply.code(400).send({ error: 'Preencha todos os dados do cartão.' });
+    for (const k of ['name', 'email', 'cpfCnpj', 'postalCode', 'addressNumber'] as const) {
+      if (!String(t[k] ?? '').trim()) return reply.code(400).send({ error: 'Preencha todos os dados do titular.' });
+    }
+
+    const r = await pagarComCartao(
+      f.asaas_payment_id,
+      {
+        holderName: String(c.holderName).trim(),
+        number: String(c.number).replace(/\D/g, ''),
+        expiryMonth: String(c.expiryMonth).padStart(2, '0'),
+        expiryYear: String(c.expiryYear).length === 2 ? `20${c.expiryYear}` : String(c.expiryYear),
+        ccv: String(c.ccv).trim(),
+      },
+      {
+        name: String(t.name).trim(),
+        email: String(t.email).trim(),
+        cpfCnpj: String(t.cpfCnpj).replace(/\D/g, ''),
+        postalCode: String(t.postalCode).replace(/\D/g, ''),
+        addressNumber: String(t.addressNumber).trim(),
+        phone: String(t.phone ?? '').replace(/\D/g, '') || undefined,
+      },
+      // O Asaas usa o IP na análise antifraude.
+      String(req.headers['x-forwarded-for'] ?? req.ip).split(',')[0]!.trim(),
+    );
+
+    if (!r.ok) return reply.code(400).send({ error: r.erro });
+    // A baixa em si vem pelo webhook (fonte única da verdade), como no PIX.
+    return { ok: true, status: r.status };
   });
 
   /** Status da fatura — o checkout consulta para fechar sozinho ao ser pago. */

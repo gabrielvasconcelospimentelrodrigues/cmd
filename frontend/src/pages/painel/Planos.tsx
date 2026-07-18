@@ -675,6 +675,10 @@ function EquipeModal({ empresa, onClose, onChange, showToast }: { empresa: { id:
  * o webhook dar a baixa. Boleto e cartão seguem no Asaas (link no rodapé).
  */
 function CheckoutPix({ fatura, onClose, onPago }: { fatura: { id: number; valor: number; descricao: string }; onClose: () => void; onPago: () => Promise<void> }) {
+  // Cartão primeiro, de propósito: é a forma que permite recorrência automática
+  // (o cliente não precisa lembrar de pagar todo mês, e não há inadimplência
+  // por esquecimento). PIX e boleto seguem disponíveis.
+  const [aba, setAba] = useState<'pix' | 'cartao' | 'boleto'>('cartao');
   const [dados, setDados] = useState<{ qr_base64: string; copia_e_cola: string; link_pagamento: string | null } | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [linkFallback, setLinkFallback] = useState<string | null>(null);
@@ -726,7 +730,24 @@ function CheckoutPix({ fatura, onClose, onPago }: { fatura: { id: number; valor:
 
         <div style={{ color: 'var(--c-ink)', fontSize: 30, fontWeight: 800, margin: '16px 0 4px' }}>{brl(fatura.valor)}</div>
 
-        {erro ? (
+        {/* Formas de pagamento — todas resolvidas aqui dentro. */}
+        <div style={{ display: 'flex', gap: 6, background: 'var(--c-surface2)', padding: 4, borderRadius: 10, margin: '14px 0 4px' }}>
+          {([['cartao', 'Cartão'], ['pix', 'PIX'], ['boleto', 'Boleto']] as const).map(([k, lbl]) => (
+            <button key={k} onClick={() => setAba(k)} style={{
+              flex: 1, padding: '8px 0', borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              fontSize: 13, fontWeight: 700,
+              background: aba === k ? 'var(--c-surface)' : 'transparent',
+              color: aba === k ? 'var(--c-ink)' : 'var(--c-ink3)',
+              boxShadow: aba === k ? 'var(--c-shadow)' : 'none',
+            }}>{lbl}</button>
+          ))}
+        </div>
+
+        {aba === 'cartao' ? (
+          <FormCartao fatura={fatura} onPago={onPago} />
+        ) : aba === 'boleto' ? (
+          <AbaBoleto faturaId={fatura.id} />
+        ) : erro ? (
           <div style={{ marginTop: 14 }}>
             <div style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--c-warnsoft)', color: 'var(--c-warnfg)', fontSize: 13, lineHeight: 1.5 }}>
               Não consegui gerar o PIX agora.{linkFallback ? ' Use a página de pagamento:' : ' Tente novamente em instantes.'}
@@ -773,6 +794,124 @@ function CheckoutPix({ fatura, onClose, onPago }: { fatura: { id: number; valor:
             )}
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** Boleto: linha digitável copiável, sem abrir o site do Asaas. */
+function AbaBoleto({ faturaId }: { faturaId: number }) {
+  const [d, setD] = useState<{ linha_digitavel: string; link_pagamento: string | null } | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+  const [copiado, setCopiado] = useState(false);
+
+  useEffect(() => {
+    let vivo = true;
+    apiGet<any>(`/minhas-faturas/${faturaId}/boleto`)
+      .then((r) => { if (vivo) setD(r); })
+      .catch((e) => { if (vivo) setErro((e as Error).message); });
+    return () => { vivo = false; };
+  }, [faturaId]);
+
+  if (erro) return <div style={{ padding: '30px 0', color: 'var(--c-warnfg)', fontSize: 13 }}>{erro}</div>;
+  if (!d) return <div style={{ padding: '40px 0', color: 'var(--c-ink3)', fontSize: 13.5 }}>Gerando o boleto…</div>;
+
+  const copiar = async () => {
+    try { await navigator.clipboard.writeText(d.linha_digitavel); setCopiado(true); setTimeout(() => setCopiado(false), 2500); } catch { /* sem permissão */ }
+  };
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ color: 'var(--c-ink3)', fontSize: 12.5, marginBottom: 8 }}>Linha digitável — pague no app do seu banco</div>
+      <div style={{ padding: '12px 14px', borderRadius: 10, background: 'var(--c-surface2)', border: '1px solid var(--c-border)', fontFamily: 'monospace', fontSize: 12.5, color: 'var(--c-ink)', wordBreak: 'break-all', lineHeight: 1.5 }}>
+        {d.linha_digitavel}
+      </div>
+      <button onClick={copiar} className="ia-btn" style={{ width: '100%', marginTop: 12, padding: 11 }}>{copiado ? 'Copiado!' : 'Copiar linha digitável'}</button>
+      <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 10, lineHeight: 1.5 }}>
+        O boleto pode levar até 1 dia útil para compensar. Para liberar na hora, use PIX ou cartão.
+      </div>
+      {d.link_pagamento && (
+        <a href={d.link_pagamento} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', marginTop: 10, color: 'var(--c-softfg)', fontSize: 12.5 }}>Baixar o PDF do boleto</a>
+      )}
+    </div>
+  );
+}
+
+/**
+ * CARTÃO — checkout transparente.
+ *
+ * Os dados vão daqui direto para o nosso backend e dele para o Asaas; nada é
+ * guardado no navegador nem no nosso banco. Por isso o formulário não tem
+ * "salvar cartão" e o estado morre junto com o modal.
+ */
+function FormCartao({ fatura, onPago }: { fatura: { id: number; valor: number }; onPago: () => Promise<void> }) {
+  const [c, setC] = useState({ holderName: '', number: '', expiry: '', ccv: '' });
+  const [t, setT] = useState({ name: '', email: '', cpfCnpj: '', postalCode: '', addressNumber: '', phone: '' });
+  const [busy, setBusy] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  const numeroFmt = (v: string) => v.replace(/\D/g, '').slice(0, 16).replace(/(\d{4})(?=\d)/g, '$1 ').trim();
+  const validadeFmt = (v: string) => {
+    const d = v.replace(/\D/g, '').slice(0, 6);
+    return d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d;
+  };
+
+  const pagar = async () => {
+    setErro(null);
+    const [mes, ano] = c.expiry.split('/');
+    if (!mes || !ano || Number(mes) < 1 || Number(mes) > 12) return setErro('Validade inválida. Use MM/AA.');
+    if (!validaCpfCnpj(t.cpfCnpj)) return setErro('CPF/CNPJ do titular inválido.');
+    setBusy(true);
+    try {
+      await apiPost(`/minhas-faturas/${fatura.id}/cartao`, {
+        cartao: { holderName: c.holderName, number: c.number.replace(/\s/g, ''), expiryMonth: mes, expiryYear: ano, ccv: c.ccv },
+        titular: t,
+      });
+      // Some com os dados da memória assim que a cobrança é aceita.
+      setC({ holderName: '', number: '', expiry: '', ccv: '' });
+      await onPago();
+    } catch (e) {
+      setErro((e as Error).message);
+    } finally { setBusy(false); }
+  };
+
+  const campo = (v: string, set: (s: string) => void, ph: string, extra?: React.CSSProperties) => (
+    <input value={v} onChange={(e) => set(e.target.value)} className="ia-input" placeholder={ph} style={{ fontSize: 13.5, ...extra }} />
+  );
+
+  return (
+    <div style={{ marginTop: 14, textAlign: 'left' }}>
+      <div style={{ display: 'grid', gap: 9 }}>
+        {campo(c.holderName, (v) => setC({ ...c, holderName: v.toUpperCase() }), 'Nome impresso no cartão')}
+        {campo(c.number, (v) => setC({ ...c, number: numeroFmt(v) }), '0000 0000 0000 0000')}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9 }}>
+          {campo(c.expiry, (v) => setC({ ...c, expiry: validadeFmt(v) }), 'MM/AA')}
+          {campo(c.ccv, (v) => setC({ ...c, ccv: v.replace(/\D/g, '').slice(0, 4) }), 'CVV')}
+        </div>
+      </div>
+
+      <div style={{ color: 'var(--c-ink3)', fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', margin: '16px 0 8px' }}>Dados do titular</div>
+      <div style={{ display: 'grid', gap: 9 }}>
+        {campo(t.name, (v) => setT({ ...t, name: v }), 'Nome completo')}
+        {campo(t.email, (v) => setT({ ...t, email: v }), 'E-mail')}
+        {campo(t.cpfCnpj, (v) => setT({ ...t, cpfCnpj: mascaraCpfCnpj(v) }), 'CPF ou CNPJ do titular')}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 9 }}>
+          {campo(t.postalCode, (v) => setT({ ...t, postalCode: v.replace(/\D/g, '').slice(0, 8) }), 'CEP')}
+          {campo(t.addressNumber, (v) => setT({ ...t, addressNumber: v }), 'Nº')}
+        </div>
+        {campo(t.phone, (v) => setT({ ...t, phone: v }), 'Telefone (opcional)')}
+      </div>
+
+      {erro && (
+        <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8, background: 'var(--c-errsoft)', color: 'var(--c-errfg)', fontSize: 12.5, lineHeight: 1.45 }}>{erro}</div>
+      )}
+
+      <button onClick={pagar} disabled={busy} className="ia-btn" style={{ width: '100%', marginTop: 14, padding: 12, fontSize: 14 }}>
+        {busy ? 'Processando…' : `Pagar ${brl(fatura.valor)}`}
+      </button>
+      <div style={{ color: 'var(--c-ink3)', fontSize: 11.5, marginTop: 9, textAlign: 'center', lineHeight: 1.5 }}>
+        Aprovação na hora — libera o acesso imediatamente.<br />
+        Pagamento processado pelo Asaas. Não guardamos os dados do seu cartão.
       </div>
     </div>
   );

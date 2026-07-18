@@ -16,14 +16,19 @@ export interface ProporcionalTerminal {
   vencimento: string;   // 'YYYY-MM-DD'
   descricao: string;
   posicao: number;      // qual terminal é este (1º, 2º…) — define o preço escalonado
+  primeiro: boolean;    // 1º terminal cobra CHEIO (mensalidade de entrada), sem pró-rata
 }
 
 /**
- * Preço do PRÓXIMO terminal, proporcional aos dias que faltam no mês.
+ * Preço do PRÓXIMO terminal.
  *
- * Cobra só o que resta do mês porque a mensalidade cheia do ciclo seguinte já
- * incluirá este terminal — sem o pró-rata, o cliente pagaria um mês inteiro por
- * poucos dias de uso.
+ * REGRA: o 1º terminal é sempre CHEIO. Ele não é um acréscimo — é a
+ * mensalidade de entrada, o que dá acesso à ferramenta. Cobrar pró-rata nele
+ * abriria a porta para assinar dia 28 e pagar 3 dias pelo mês inteiro de uso.
+ *
+ * Do 2º em diante vale o pró-rata: aí sim é acréscimo a um plano já ativo, e a
+ * mensalidade cheia do ciclo seguinte já incluirá o terminal novo — sem o
+ * proporcional, o cliente pagaria um mês inteiro por poucos dias de uso.
  */
 export async function calcularProporcionalProximoTerminal(tenantId: number): Promise<ProporcionalTerminal> {
   const precos = await getPrecos();
@@ -44,17 +49,23 @@ export async function calcularProporcionalProximoTerminal(tenantId: number): Pro
   const diasNoMes = new Date(ano, mes + 1, 0).getDate();
   const diaAtual = hoje.getDate();
   const diasRestantes = diasNoMes - diaAtual + 1;
-  const valor = Math.round(valorCheio * (diasRestantes / diasNoMes) * 100) / 100;
   const referencia = `${ano}-${String(mes + 1).padStart(2, '0')}`;
-  // 5 dias para pagar (boleto); no PIX cai na hora.
+  // 5 dias para pagar (boleto); no PIX e no cartão cai na hora.
   const vencimento = new Date(ano, mes, Math.min(diaAtual + 5, diasNoMes)).toISOString().slice(0, 10);
+
+  // 1º terminal = mensalidade de entrada, sempre cheia.
+  const ehPrimeiro = posicao === 1;
+  const valor = ehPrimeiro ? valorCheio : Math.round(valorCheio * (diasRestantes / diasNoMes) * 100) / 100;
 
   return {
     valor,
     referencia,
     vencimento,
     posicao,
-    descricao: `Novo terminal — proporcional (${diasRestantes}/${diasNoMes} dias de ${referencia})`,
+    primeiro: ehPrimeiro,
+    descricao: ehPrimeiro
+      ? `Mensalidade — 1º terminal (${referencia})`
+      : `${posicao}º terminal — proporcional (${diasRestantes}/${diasNoMes} dias de ${referencia})`,
   };
 }
 

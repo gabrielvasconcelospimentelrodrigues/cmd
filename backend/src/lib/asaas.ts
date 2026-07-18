@@ -70,6 +70,63 @@ export async function pixDaCobranca(paymentId: string): Promise<PixDaCobranca | 
   }
 }
 
+/** Linha digitável e código de barras do boleto, para exibir sem sair do painel. */
+export async function boletoDaCobranca(paymentId: string): Promise<{ identificationField: string; barCode: string } | null> {
+  if (!asaasAtivo()) return null;
+  try {
+    return await chamar(`/payments/${paymentId}/identificationField`, 'GET');
+  } catch (e) {
+    console.error(`[asaas] falha ao obter boleto de ${paymentId}:`, (e as Error).message);
+    return null;
+  }
+}
+
+export interface DadosCartao {
+  holderName: string;
+  number: string;
+  expiryMonth: string;
+  expiryYear: string;
+  ccv: string;
+}
+export interface TitularCartao {
+  name: string;
+  email: string;
+  cpfCnpj: string;
+  postalCode: string;
+  addressNumber: string;
+  phone?: string;
+}
+
+/**
+ * Paga a cobrança com CARTÃO (checkout transparente).
+ *
+ * ⚠️ SEGURANÇA: os dados do cartão apenas ATRAVESSAM esta função a caminho do
+ * Asaas — nunca são gravados em banco, nem escritos em log, nem devolvidos ao
+ * cliente. Qualquer erro é logado só com a mensagem do Asaas, jamais com o
+ * corpo da requisição (que contém o número do cartão).
+ */
+export async function pagarComCartao(
+  paymentId: string,
+  cartao: DadosCartao,
+  titular: TitularCartao,
+  remoteIp: string,
+): Promise<{ ok: true; status: string } | { ok: false; erro: string }> {
+  if (!asaasAtivo()) return { ok: false, erro: 'Pagamento por cartão indisponível no momento.' };
+  try {
+    const r = await chamar<{ status: string }>(`/payments/${paymentId}/payWithCreditCard`, 'POST', {
+      creditCard: cartao,
+      creditCardHolderInfo: titular,
+      remoteIp,
+    });
+    return { ok: true, status: r.status };
+  } catch (e) {
+    // Só a mensagem — nunca o payload.
+    const erro = (e as Error).message.replace(/Asaas \d+: /, '');
+    console.error(`[asaas] cartão recusado na cobrança ${paymentId}: ${erro}`);
+    return { ok: false, erro };
+  }
+}
+
 /** Só dígitos; CPF tem 11 e CNPJ 14 — o Asaas recusa qualquer outra coisa. */
 export function documentoValido(doc: string | null | undefined): string | null {
   const d = String(doc ?? '').replace(/\D/g, '');

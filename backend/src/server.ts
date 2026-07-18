@@ -25,6 +25,18 @@ async function buildServer() {
   const app = Fastify({
     logger: {
       level: (env.NODE_ENV === 'production' || process.env.VERCEL) ? 'info' : 'debug',
+      // TRAVA DE SEGURANÇA: o checkout transparente recebe dados de CARTÃO no
+      // corpo da requisição. O Fastify não loga corpo por padrão, mas isso
+      // muda com uma linha — a redação garante que, mesmo se alguém ligar o
+      // log de body ou de headers, número/CVV e credenciais saiam mascarados.
+      redact: {
+        paths: [
+          'req.body.cartao', 'req.body.cartao.number', 'req.body.cartao.ccv',
+          'req.body.titular', 'body.cartao', 'body.titular',
+          'req.headers.authorization', 'req.headers["asaas-access-token"]',
+        ],
+        censor: '[REDACTED]',
+      },
       transport:
         (env.NODE_ENV === 'development' && !process.env.VERCEL)
           ? { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss', ignore: 'pid,hostname' } }
