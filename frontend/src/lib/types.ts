@@ -186,9 +186,12 @@ export interface Fatura {
   referencia: string;
   valor: number;
   vencimento: string;
-  status: 'aberto' | 'pago';
+  // 'cancelado' = anulada (ex.: período de cortesia) — não é dívida nem pagamento.
+  status: 'aberto' | 'pago' | 'cancelado';
   pago_em: string | null;
   created_at: string;
+  /** Página de pagamento no Asaas (PIX/boleto/cartão). Null enquanto não emitida. */
+  link_pagamento?: string | null;
   empresas?: { nome: string } | null;
 }
 

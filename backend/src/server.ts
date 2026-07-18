@@ -12,6 +12,7 @@ import { adminRoutes } from './routes/admin';
 import { empresaRoutes } from './routes/empresas';
 import { economiaRoutes } from './routes/economia';
 import { liveRoutes } from './routes/live';
+import { webhookRoutes } from './routes/webhooks';
 import { closeRedis } from './lib/redis';
 import { closePool } from './lib/db';
 import { closeQueues } from './lib/queue';
@@ -52,6 +53,8 @@ async function buildServer() {
   await app.register(empresaRoutes);
   await app.register(economiaRoutes);
   await app.register(liveRoutes);
+  // Sem autenticação de usuário: quem chama é o Asaas (valida por token próprio).
+  await app.register(webhookRoutes);
 
   return app;
 }

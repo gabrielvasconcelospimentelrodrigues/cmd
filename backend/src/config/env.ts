@@ -25,6 +25,18 @@ const schema = z.object({
     .string()
     .default('http://localhost:5173')
     .transform((v) => v.split(',').map((s) => s.trim()).filter(Boolean)),
+
+  // ---- Asaas (cobrança online) --------------------------------------------
+  // Opcionais: sem a chave, o sistema segue funcionando com baixa manual — só
+  // não gera cobrança. Assim um deploy sem as variáveis não derruba a API.
+  ASAAS_API_KEY: z.string().optional(),
+  // Sandbox por padrão: cobra de mentira. Trocar para a URL de produção só
+  // depois de validar o fluxo ponta a ponta.
+  ASAAS_BASE_URL: z.string().url().default('https://api-sandbox.asaas.com/v3'),
+  // Token que o Asaas envia no header 'asaas-access-token' de cada webhook.
+  // É o que impede um terceiro de forjar "pagamento recebido" e liberar
+  // automação sem pagar — sem ele, o webhook é recusado.
+  ASAAS_WEBHOOK_TOKEN: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);

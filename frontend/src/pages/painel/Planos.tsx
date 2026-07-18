@@ -306,8 +306,8 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
         <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--c-border)', color: 'var(--c-ink3)', fontSize: 12, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase' }}>
           Histórico de Faturamento e Pagamentos
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px 140px 140px 120px', padding: '10px 20px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)', fontSize: 11, fontWeight: 600, color: 'var(--c-ink3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
-          <span>Fatura</span><span>Referência</span><span>Vencimento</span><span>Valor</span><span>Status</span>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 130px 130px 130px 110px 120px', padding: '10px 20px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)', fontSize: 11, fontWeight: 600, color: 'var(--c-ink3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+          <span>Fatura</span><span>Referência</span><span>Vencimento</span><span>Valor</span><span>Status</span><span style={{ textAlign: 'right' }}>Pagamento</span>
         </div>
         {faturas.length === 0 ? (
           <div style={{ padding: 30, textAlign: 'center', color: 'var(--c-ink3)', fontSize: 14 }}>Nenhuma fatura emitida ainda.</div>
@@ -316,13 +316,26 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
             const vencida = f.status === 'aberto' && f.vencimento < hojeISO;
             const rotulo = f.status === 'pago' ? 'Pago' : vencida ? 'Vencida' : 'Aberto';
             const cor = f.status === 'pago' ? 'var(--c-okfg)' : vencida ? 'var(--c-warnfg)' : 'var(--c-ink2)';
+            const podePagar = f.status !== 'pago' && !!f.link_pagamento;
             return (
-              <div key={f.id} style={{ display: 'grid', gridTemplateColumns: '1fr 140px 140px 140px 120px', alignItems: 'center', padding: '12px 20px', borderBottom: '1px solid var(--c-border)' }}>
+              <div key={f.id} style={{ display: 'grid', gridTemplateColumns: '1fr 130px 130px 130px 110px 120px', alignItems: 'center', padding: '12px 20px', borderBottom: '1px solid var(--c-border)' }}>
                 <span style={{ color: 'var(--c-ink)', fontSize: 13, fontWeight: 600 }}>{f.descricao || f.tipo}</span>
                 <span style={{ color: 'var(--c-ink2)', fontSize: 13 }}>{f.referencia}</span>
                 <span style={{ color: 'var(--c-ink2)', fontSize: 13 }}>{f.vencimento.split('-').reverse().join('/')}</span>
                 <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 700 }}>{brl(f.valor)}</span>
                 <span style={{ fontWeight: 600, color: cor, fontSize: 12 }}>{rotulo}</span>
+                <span style={{ textAlign: 'right' }}>
+                  {podePagar ? (
+                    // Abre a página do Asaas (PIX / boleto / cartão). A baixa
+                    // chega sozinha por webhook — o cliente não precisa avisar.
+                    <a href={f.link_pagamento!} target="_blank" rel="noopener noreferrer"
+                       style={{ display: 'inline-block', padding: '7px 14px', borderRadius: 8, background: vencida ? 'var(--c-warn)' : 'var(--c-blued)', color: '#fff', fontSize: 12.5, fontWeight: 700, textDecoration: 'none' }}>
+                      Pagar
+                    </a>
+                  ) : (
+                    <span style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{f.status === 'pago' ? '—' : 'em emissão'}</span>
+                  )}
+                </span>
               </div>
             );
           })

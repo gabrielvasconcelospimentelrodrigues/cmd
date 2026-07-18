@@ -6,6 +6,7 @@ import { montarPlano } from './empresas';
 import { registrarLog, ator, atorNome } from '../lib/audit';
 import { getPrecos, precoTerminalNaPosicao, type Precos } from '../lib/precos';
 import { getMotorConfig, type MotorConfig } from '../lib/motor-config';
+import { criarCobrancaAsaas } from '../lib/asaas';
 import type { Database } from '../types/database';
 
 const brl = (v: number | string) =>
@@ -552,12 +553,16 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       tenant_id: id, tipo: 'mensalidade', descricao: `Mensalidade ${ref} — ${plano.total_terminais} terminal(is)`,
       referencia: ref, valor: plano.mensal, vencimento: venc, status: 'aberto',
     }).select('*').single();
+    // Emite a cobrança (PIX/boleto/cartão). Não lança: se o Asaas falhar, a
+    // fatura continua valendo e o motivo fica em erro_cobranca.
+    const cobranca = data ? await criarCobrancaAsaas(data) : null;
     await registrarLog({
       tenantId: id, categoria: 'financeiro', acao: 'fatura.mensalidade', nivel: 'info', ator: ator(req),
-      descricao: `${atorNome(req)} gerou a mensalidade de ${ref} de ${plano.tenant_nome} (${brl(plano.mensal)}).`,
-      meta: { referencia: ref, valor: plano.mensal },
+      descricao: `${atorNome(req)} gerou a mensalidade de ${ref} de ${plano.tenant_nome} (${brl(plano.mensal)})${cobranca ? ' — cobrança emitida no Asaas' : ''}.`,
+      meta: { referencia: ref, valor: plano.mensal, asaas_payment_id: cobranca?.asaas_payment_id ?? null },
     });
-    return data;
+    // Devolve já com o link de pagamento (o insert acima é anterior à cobrança).
+    return { ...data, ...(cobranca ?? {}) };
   });
 
   // Lançamentos da operação (nossos custos / receitas avulsas).
@@ -1082,11 +1087,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const proporcional = Math.round(valorTerminal * (diasRestantes / diasNoMes) * 100) / 100;
     const referencia = `${ano}-${String(mes + 1).padStart(2, '0')}`;
     const vencimento = new Date(ano, mes, Math.min(diaAtual + 5, diasNoMes)).toISOString().slice(0, 10);
-    await (supabaseAdmin as any).from('faturas').insert({
+    const { data: fatProporcional } = await (supabaseAdmin as any).from('faturas').insert({
       tenant_id: tenantId, empresa_id: empresaId, tipo: 'terminal_proporcional',
       descricao: `Novo terminal — proporcional (${diasRestantes}/${diasNoMes} dias de ${referencia})`,
       referencia, valor: proporcional, vencimento, status: 'aberto',
-    });
+    }).select('*').single();
+    // Emite a cobrança (não lança — ver lib/asaas.ts).
+    if (fatProporcional) await criarCobrancaAsaas(fatProporcional);
 
     const { data: updated } = await (supabaseAdmin as any)
       .from('terminal_requests')

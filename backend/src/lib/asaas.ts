@@ -1,0 +1,154 @@
+/**
+ * ASAAS — cobrança online (PIX / boleto / cartão) das faturas do assinante.
+ *
+ * Papel no sistema: fecha o ciclo do dinheiro. Hoje o super admin dá baixa na
+ * mão; com isto o cliente paga, o Asaas avisa por webhook e a fatura vira
+ * 'pago' sozinha — e o gate de pagamento (lib/acesso.ts) libera a automação.
+ *
+ * Princípio de segurança adotado aqui: falha ao cobrar NUNCA quebra o fluxo de
+ * faturamento. Se o Asaas estiver fora ou o cadastro do cliente incompleto, a
+ * fatura é criada assim mesmo e o motivo fica em faturas.erro_cobranca — a
+ * cobrança pode ser reemitida depois. O contrário (não emitir a fatura porque
+ * o gateway caiu) faria o cliente sumir da régua de cobrança.
+ */
+import { env } from '../config/env';
+import { supabaseAdmin } from './supabase';
+
+export interface CobrancaCriada {
+  asaas_payment_id: string;
+  link_pagamento: string;
+}
+
+/** true quando há chave configurada — sem ela, seguimos com baixa manual. */
+export function asaasAtivo(): boolean {
+  return !!env.ASAAS_API_KEY;
+}
+
+async function chamar<T>(caminho: string, metodo: 'GET' | 'POST', corpo?: unknown): Promise<T> {
+  const resp = await fetch(`${env.ASAAS_BASE_URL}${caminho}`, {
+    method: metodo,
+    headers: {
+      'Content-Type': 'application/json',
+      access_token: env.ASAAS_API_KEY ?? '',
+    },
+    body: corpo ? JSON.stringify(corpo) : undefined,
+  });
+
+  const texto = await resp.text();
+  let json: any = {};
+  try { json = texto ? JSON.parse(texto) : {}; } catch { /* resposta não-JSON */ }
+
+  if (!resp.ok) {
+    // O Asaas devolve os problemas em errors[].description — bem mais útil que
+    // "400 Bad Request" para quem for ler o log ou o erro_cobranca.
+    const detalhe = Array.isArray(json?.errors) && json.errors.length
+      ? json.errors.map((e: any) => e.description).join('; ')
+      : texto.slice(0, 200);
+    throw new Error(`Asaas ${resp.status}: ${detalhe}`);
+  }
+  return json as T;
+}
+
+/** Só dígitos; CPF tem 11 e CNPJ 14 — o Asaas recusa qualquer outra coisa. */
+export function documentoValido(doc: string | null | undefined): string | null {
+  const d = String(doc ?? '').replace(/\D/g, '');
+  return d.length === 11 || d.length === 14 ? d : null;
+}
+
+interface TenantParaCobranca {
+  id: number;
+  name: string;
+  cnpj: string | null;
+  responsavel: string | null;
+  telefone: string | null;
+  asaas_customer_id: string | null;
+}
+
+/**
+ * Devolve o id do cliente no Asaas, criando-o na primeira vez e guardando em
+ * tenants.asaas_customer_id. Reaproveitar é essencial: criar um cliente novo a
+ * cada cobrança espalharia o histórico do assinante em vários cadastros.
+ */
+export async function garantirClienteAsaas(tenantId: number): Promise<string> {
+  const { data: t } = await (supabaseAdmin as any)
+    .from('tenants')
+    .select('id, name, cnpj, responsavel, telefone, asaas_customer_id, owner_user_id')
+    .eq('id', tenantId)
+    .maybeSingle();
+
+  if (!t) throw new Error(`Assinante #${tenantId} não encontrado.`);
+  if (t.asaas_customer_id) return t.asaas_customer_id as string;
+
+  const doc = documentoValido(t.cnpj);
+  if (!doc) {
+    throw new Error(
+      `CPF/CNPJ do assinante "${t.name}" ausente ou inválido (valor atual: ${t.cnpj ?? 'vazio'}). ` +
+      'O Asaas exige um documento válido — corrija em Configurações antes de cobrar.',
+    );
+  }
+
+  // E-mail do titular: o Asaas usa para enviar a cobrança.
+  const { data: u } = await (supabaseAdmin as any).auth.admin.getUserById(t.owner_user_id);
+  const email = u?.user?.email ?? undefined;
+
+  const criado = await chamar<{ id: string }>('/customers', 'POST', {
+    name: t.name,
+    cpfCnpj: doc,
+    email,
+    mobilePhone: String(t.telefone ?? '').replace(/\D/g, '') || undefined,
+    // Liga o cliente do Asaas ao nosso assinante (facilita conferência lá).
+    externalReference: `tenant:${t.id}`,
+    notificationDisabled: false,
+  });
+
+  await (supabaseAdmin as any).from('tenants').update({ asaas_customer_id: criado.id }).eq('id', t.id);
+  return criado.id;
+}
+
+interface FaturaParaCobranca {
+  id: number;
+  tenant_id: number;
+  valor: number | string;
+  vencimento: string;
+  descricao: string | null;
+  tipo: string;
+}
+
+/**
+ * Cria a cobrança da fatura e grava o id + link nela.
+ *
+ * billingType 'UNDEFINED': o Asaas mostra PIX, boleto e cartão e o cliente
+ * escolhe — não faz sentido decidirmos por ele.
+ *
+ * NÃO lança: em caso de falha grava faturas.erro_cobranca e devolve null, para
+ * que a emissão da fatura nunca dependa do gateway estar de pé.
+ */
+export async function criarCobrancaAsaas(fatura: FaturaParaCobranca): Promise<CobrancaCriada | null> {
+  if (!asaasAtivo()) return null;
+
+  try {
+    const customer = await garantirClienteAsaas(fatura.tenant_id);
+    const pagamento = await chamar<{ id: string; invoiceUrl: string }>('/payments', 'POST', {
+      customer,
+      billingType: 'UNDEFINED',
+      value: Number(fatura.valor),
+      dueDate: String(fatura.vencimento).slice(0, 10),
+      description: fatura.descricao || fatura.tipo,
+      // É por aqui que conferimos, no webhook, que a cobrança é nossa.
+      externalReference: `fatura:${fatura.id}`,
+    });
+
+    await (supabaseAdmin as any).from('faturas').update({
+      asaas_payment_id: pagamento.id,
+      link_pagamento: pagamento.invoiceUrl,
+      erro_cobranca: null,
+    }).eq('id', fatura.id);
+
+    return { asaas_payment_id: pagamento.id, link_pagamento: pagamento.invoiceUrl };
+  } catch (e) {
+    const motivo = (e as Error).message.slice(0, 500);
+    console.error(`[asaas] falha ao cobrar fatura #${fatura.id}:`, motivo);
+    await (supabaseAdmin as any).from('faturas').update({ erro_cobranca: motivo }).eq('id', fatura.id);
+    return null;
+  }
+}
