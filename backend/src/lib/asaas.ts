@@ -24,7 +24,7 @@ export function asaasAtivo(): boolean {
   return !!env.ASAAS_API_KEY;
 }
 
-async function chamar<T>(caminho: string, metodo: 'GET' | 'POST', corpo?: unknown): Promise<T> {
+async function chamar<T>(caminho: string, metodo: 'GET' | 'POST' | 'DELETE', corpo?: unknown): Promise<T> {
   const resp = await fetch(`${env.ASAAS_BASE_URL}${caminho}`, {
     method: metodo,
     headers: {
@@ -125,6 +125,72 @@ export async function pagarComCartao(
     console.error(`[asaas] cartão recusado na cobrança ${paymentId}: ${erro}`);
     return { ok: false, erro };
   }
+}
+
+/**
+ * Cria (ou substitui) a ASSINATURA mensal no cartão do cliente.
+ *
+ * É o que dá recorrência de verdade: o Asaas passa a cobrar sozinho todo mês e
+ * avisa por webhook. Sem isso, cada mensalidade dependia de alguém lembrar de
+ * gerar e do cliente lembrar de pagar — inadimplência por esquecimento.
+ *
+ * O cartão é enviado UMA vez; a partir daí o Asaas guarda o token e nós nunca
+ * mais tocamos nesses dados.
+ */
+export async function criarAssinaturaCartao(opts: {
+  tenantId: number;
+  valorMensal: number;
+  descricao: string;
+  cartao: DadosCartao;
+  titular: TitularCartao;
+  remoteIp: string;
+}): Promise<{ ok: true; subscriptionId: string } | { ok: false; erro: string }> {
+  if (!asaasAtivo()) return { ok: false, erro: 'Cobrança indisponível no momento.' };
+  try {
+    const customer = await garantirClienteAsaas(opts.tenantId);
+
+    // Cancela uma assinatura anterior para não cobrar duas vezes o mesmo mês
+    // (ex.: cliente que trocou de cartão ou mudou de plano).
+    const { data: t } = await (supabaseAdmin as any)
+      .from('tenants').select('asaas_subscription_id').eq('id', opts.tenantId).maybeSingle();
+    if (t?.asaas_subscription_id) {
+      await chamar(`/subscriptions/${t.asaas_subscription_id}`, 'DELETE').catch(() => {});
+    }
+
+    // Próximo ciclo: um mês a partir de hoje (o mês atual já foi pago à vista).
+    const prox = new Date();
+    prox.setMonth(prox.getMonth() + 1);
+
+    const assinatura = await chamar<{ id: string }>('/subscriptions', 'POST', {
+      customer,
+      billingType: 'CREDIT_CARD',
+      cycle: 'MONTHLY',
+      value: opts.valorMensal,
+      nextDueDate: prox.toISOString().slice(0, 10),
+      description: opts.descricao,
+      creditCard: opts.cartao,
+      creditCardHolderInfo: opts.titular,
+      remoteIp: opts.remoteIp,
+      externalReference: `tenant:${opts.tenantId}`,
+    });
+
+    await (supabaseAdmin as any)
+      .from('tenants').update({ asaas_subscription_id: assinatura.id }).eq('id', opts.tenantId);
+
+    return { ok: true, subscriptionId: assinatura.id };
+  } catch (e) {
+    const erro = (e as Error).message.replace(/Asaas \d+: /, '');
+    console.error(`[asaas] falha ao criar assinatura do tenant ${opts.tenantId}: ${erro}`);
+    return { ok: false, erro };
+  }
+}
+
+/** Dados de uma cobrança (usado pelo webhook para faturar o que o Asaas gerou). */
+export async function buscarCobranca(paymentId: string): Promise<any | null> {
+  if (!asaasAtivo()) return null;
+  try {
+    return await chamar(`/payments/${paymentId}`, 'GET');
+  } catch { return null; }
 }
 
 /** Só dígitos; CPF tem 11 e CNPJ 14 — o Asaas recusa qualquer outra coisa. */

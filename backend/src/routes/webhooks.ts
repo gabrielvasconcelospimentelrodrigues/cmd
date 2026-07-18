@@ -11,6 +11,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { env } from '../config/env';
 import { registrarLog } from '../lib/audit';
 import { liberarTerminal } from '../lib/terminais';
+import { buscarCobranca } from '../lib/asaas';
 
 /** A baixa não tem um usuário por trás — quem agiu foi o gateway. */
 const ATOR_ASAAS = { usuario_id: null, actor_nome: 'Asaas (automático)', actor_email: null, actor_role: 'sistema' };
@@ -36,11 +37,41 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
 
     // 2) Acha a fatura pelo id da cobrança. Se não for nossa, ignoramos com 200:
     // devolver erro faria o Asaas reenviar o evento indefinidamente.
-    const { data: fatura } = await (supabaseAdmin as any)
+    let { data: fatura } = await (supabaseAdmin as any)
       .from('faturas')
       .select('id, tenant_id, status, valor, descricao, tipo, terminal_request_id')
       .eq('asaas_payment_id', pagamentoId)
       .maybeSingle();
+
+    // COBRANÇA GERADA PELA ASSINATURA: o Asaas cria a mensalidade sozinho todo
+    // mês, então ela não existe no nosso banco até este evento chegar. Criamos
+    // a fatura aqui — sem isso, o cliente pagaria e o pagamento não apareceria
+    // no financeiro nem liberaria a automação.
+    if (!fatura) {
+      const cob = await buscarCobranca(pagamentoId);
+      const assinatura = cob?.subscription;
+      if (assinatura) {
+        const { data: dono } = await (supabaseAdmin as any)
+          .from('tenants').select('id').eq('asaas_subscription_id', assinatura).maybeSingle();
+        if (dono) {
+          const ref = String(cob.dueDate ?? '').slice(0, 7);
+          const { data: nova } = await (supabaseAdmin as any).from('faturas').insert({
+            tenant_id: dono.id,
+            tipo: 'mensalidade',
+            descricao: cob.description || `Mensalidade ${ref} (assinatura)`,
+            referencia: ref,
+            valor: Number(cob.value ?? 0),
+            vencimento: String(cob.dueDate ?? '').slice(0, 10),
+            status: 'aberto',
+            asaas_payment_id: pagamentoId,
+            asaas_subscription_id: assinatura,
+            link_pagamento: cob.invoiceUrl ?? null,
+          }).select('id, tenant_id, status, valor, descricao, tipo, terminal_request_id').single();
+          fatura = nova;
+          req.log.info(`[asaas] mensalidade da assinatura criada como fatura #${nova?.id}.`);
+        }
+      }
+    }
 
     if (!fatura) {
       req.log.warn(`[asaas] evento ${evento} de cobrança desconhecida (${pagamentoId}).`);

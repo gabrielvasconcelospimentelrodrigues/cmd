@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { supabaseAdmin } from '../lib/supabase';
 import { registrarLog, ator, atorNome } from '../lib/audit';
 import { getPrecos, precoTerminalNaPosicao } from '../lib/precos';
-import { pixDaCobranca, boletoDaCobranca, pagarComCartao } from '../lib/asaas';
+import { pixDaCobranca, boletoDaCobranca, pagarComCartao, criarAssinaturaCartao } from '../lib/asaas';
 
 /**
  * Monta o resumo do PLANO de um assinante (tenant):
@@ -233,8 +233,43 @@ export async function empresaRoutes(app: FastifyInstance): Promise<void> {
     );
 
     if (!r.ok) return reply.code(400).send({ error: r.erro });
+
+    // RECORRÊNCIA: com o cartão aprovado, deixa a mensalidade no automático.
+    // Só faz sentido para a mensalidade — proporcional de terminal é cobrança
+    // única. Falhar aqui NÃO invalida o pagamento que já foi aprovado: o
+    // cliente pagou, o acesso libera, e a recorrência pode ser reativada depois.
+    let recorrencia: { ativa: boolean; erro?: string } = { ativa: false };
+    if (b.assinar !== false && f.tipo === 'mensalidade') {
+      const plano = await montarPlano(req.tenant!.id);
+      const mensal = Number(plano?.mensal ?? 0);
+      if (mensal > 0) {
+        const a = await criarAssinaturaCartao({
+          tenantId: req.tenant!.id,
+          valorMensal: mensal,
+          descricao: `Mensalidade IA-CMD — ${plano?.total_terminais ?? 1} terminal(is)`,
+          cartao: {
+            holderName: String(c.holderName).trim(),
+            number: String(c.number).replace(/\D/g, ''),
+            expiryMonth: String(c.expiryMonth).padStart(2, '0'),
+            expiryYear: String(c.expiryYear).length === 2 ? `20${c.expiryYear}` : String(c.expiryYear),
+            ccv: String(c.ccv).trim(),
+          },
+          titular: {
+            name: String(t.name).trim(),
+            email: String(t.email).trim(),
+            cpfCnpj: String(t.cpfCnpj).replace(/\D/g, ''),
+            postalCode: String(t.postalCode).replace(/\D/g, ''),
+            addressNumber: String(t.addressNumber).trim(),
+            phone: String(t.phone ?? '').replace(/\D/g, '') || undefined,
+          },
+          remoteIp: String(req.headers['x-forwarded-for'] ?? req.ip).split(',')[0]!.trim(),
+        });
+        recorrencia = a.ok ? { ativa: true } : { ativa: false, erro: a.erro };
+      }
+    }
+
     // A baixa em si vem pelo webhook (fonte única da verdade), como no PIX.
-    return { ok: true, status: r.status };
+    return { ok: true, status: r.status, recorrencia };
   });
 
   /** Status da fatura — o checkout consulta para fechar sozinho ao ser pago. */
