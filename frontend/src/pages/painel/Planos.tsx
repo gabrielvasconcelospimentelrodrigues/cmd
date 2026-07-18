@@ -45,14 +45,17 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
     try {
       // O contrato já nasce com a cobrança: leva o cliente direto ao pagamento.
       // O terminal é liberado sozinho quando o Asaas confirma (webhook).
-      const r = await apiPost<{ fatura_id: number | null; link_pagamento: string | null; valor: number; erro_cobranca: string | null }>(
+      const r = await apiPost<{ fatura_id: number | null; link_pagamento: string | null; valor: number; erro_cobranca: string | null; isento?: boolean }>(
         '/terminal-requests', { empresa_id: empresaId },
       );
       setConfirmar(null);
       await carregar();
       if (onChange) await onChange();
 
-      if (r.fatura_id) {
+      if (r.isento) {
+        // Parceiro/teste: liberado na hora, sem cobrança. Não é erro.
+        showToast({ title: 'Terminal liberado', msg: 'Sua conta é isenta de cobrança — já pode usar.', kind: 'ok' });
+      } else if (r.fatura_id) {
         // Abre o checkout AQUI mesmo: o cliente paga e a tela confirma sozinha
         // quando o terminal é liberado.
         setPagar({ id: r.fatura_id, valor: r.valor, descricao: 'Novo terminal (valor proporcional)' });
@@ -389,8 +392,12 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
               Mensalidade atual <b style={{ color: 'var(--c-ink2)' }}>{brl(plano.mensal)}</b> → depois <b style={{ color: 'var(--c-softfg)' }}>{brl(plano.mensal + (plano.proximo_terminal ?? plano.valor_terminal))}</b>
             </div>
             <p style={{ color: 'var(--c-ink3)', fontSize: 12.5, margin: '12px 0 0', lineHeight: 1.55 }}>
-              Ao confirmar, abrimos o <b>pagamento do valor proporcional</b> (só os dias que faltam neste mês).
-              Assim que o pagamento for aprovado, o terminal é <b>liberado automaticamente</b>.
+              {(plano as any).isento_pagamento ? (
+                <>Sua conta é <b>isenta de cobrança</b> — o terminal é liberado na hora, sem pagamento.</>
+              ) : (
+                <>Ao confirmar, abrimos o <b>pagamento do valor proporcional</b> (só os dias que faltam neste mês).
+                Assim que o pagamento for aprovado, o terminal é <b>liberado automaticamente</b>.</>
+              )}
             </p>
             <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
               <button onClick={() => setConfirmar(null)} className="ia-btn-outline" style={{ flex: 1 }}>Cancelar</button>

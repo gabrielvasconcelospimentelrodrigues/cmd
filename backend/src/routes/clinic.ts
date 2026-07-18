@@ -2,8 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { supabaseAdmin } from '../lib/supabase';
 import { encrypt } from '../lib/crypto';
 import { registrarLog, ator, atorNome } from '../lib/audit';
-import { verificarAcessoAutomacao } from '../lib/acesso';
-import { calcularProporcionalProximoTerminal } from '../lib/terminais';
+import { verificarAcessoAutomacao, isencaoVigente } from '../lib/acesso';
+import { calcularProporcionalProximoTerminal, liberarTerminal } from '../lib/terminais';
 import { criarCobrancaAsaas } from '../lib/asaas';
 
 const brl = (v: number) => `R$ ${Number(v).toFixed(2).replace('.', ',')}`;
@@ -375,6 +375,19 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
     if (error || !data) {
       req.log.error(error);
       return reply.code(500).send({ error: 'Falha ao criar solicitação de terminal.' });
+    }
+
+    // ISENTO (parceiro/teste) não é cobrado: o terminal é liberado na hora, sem
+    // fatura. Sem isto, um parceiro receberia cobrança e entraria na régua
+    // financeira — o oposto da isenção.
+    if (isencaoVigente(req.tenant!)) {
+      await liberarTerminal(data.id, 'assinante isento de pagamento');
+      await registrarLog({
+        tenantId: req.tenant!.id, categoria: 'terminal', acao: 'terminal.liberado_isento', nivel: 'info', ator: ator(req),
+        descricao: `${atorNome(req)} contratou um terminal — liberado sem cobrança (assinante isento).`,
+        meta: { empresa_id: empresaId },
+      });
+      return reply.code(201).send({ ...data, status: 'approved', isento: true, fatura_id: null, valor: 0, link_pagamento: null, erro_cobranca: null });
     }
 
     // AUTOATENDIMENTO: já emite a cobrança do proporcional. O terminal é

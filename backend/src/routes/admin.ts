@@ -8,6 +8,7 @@ import { getPrecos, precoTerminalNaPosicao, type Precos } from '../lib/precos';
 import { getMotorConfig, type MotorConfig } from '../lib/motor-config';
 import { criarCobrancaAsaas } from '../lib/asaas';
 import { liberarTerminal } from '../lib/terminais';
+import { isencaoVigente } from '../lib/acesso';
 import type { Database } from '../types/database';
 
 const brl = (v: number | string) =>
@@ -611,6 +612,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const plano = await montarPlano(id);
     if (!plano) return reply.code(404).send({ error: 'assinante não encontrado.' });
     if (plano.mensal <= 0) return reply.code(400).send({ error: 'Sem terminais contratados — nada a cobrar.' });
+    // ISENTO NÃO ENTRA NO FATURAMENTO. Sem esta trava, um parceiro receberia
+    // cobrança e apareceria na régua financeira como se devesse.
+    const { data: tIsen } = await (supabaseAdmin as any)
+      .from('tenants').select('name, isento_pagamento, isento_ate').eq('id', id).maybeSingle();
+    if (tIsen && isencaoVigente(tIsen)) {
+      const ate = tIsen.isento_ate ? ` (até ${String(tIsen.isento_ate).split('-').reverse().join('/')})` : ' (por tempo indeterminado)';
+      return reply.code(400).send({ error: `${tIsen.name} está ISENTO de pagamento${ate} — não é cobrado. Remova a isenção antes de gerar mensalidade.` });
+    }
     const hoje = new Date();
     const ref = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
     const { data: ja } = await (supabaseAdmin as any)
