@@ -142,16 +142,19 @@ export async function listarPendentes(uploadId: number): Promise<PendentePacient
  * olho/dia). E catarata nunca colide com OCI (modalidade diferente). */
 export async function jaCadastrado(clinicAccountId: number, cns: string, dataAtendimento: string | null, excludePatientId: number, modalidade: string = 'oci'): Promise<boolean> {
   if (!cns || !dataAtendimento) return false;
+  const ehCatarata = modalidade === 'catarata';
   const { count } = await supabaseAdmin
     .from('patient_records')
     .select('id', { head: true, count: 'exact' })
     .eq('clinic_account_id', clinicAccountId)
     .eq('cns', cns)
     .eq('data_atendimento', dataAtendimento)
-    .eq('modalidade', modalidade === 'catarata' ? 'catarata' : 'oci')
+    .eq('modalidade', ehCatarata ? 'catarata' : 'oci')
     .in('status', ['registered', 'verified_ok', 'verified_divergent'])
     .neq('id', excludePatientId);
-  return (count ?? 0) > 0;
+  // Catarata aceita 2 na mesma data (dois olhos); só o 3º é duplicata. Como
+  // este count exclui o próprio paciente, o limite comparado é 2 (catarata) / 1.
+  return (count ?? 0) >= (ehCatarata ? 2 : 1);
 }
 
 /** Verifica os duplicados da lista ANTES de cadastrar: um pendente é duplicado
@@ -173,9 +176,15 @@ export async function marcarDuplicados(uploadId: number, tenantId: number): Prom
   const pendentes = (pend ?? []) as { id: number; cns: string | null; data_atendimento: string | null; modalidade: string | null }[];
   if (pendentes.length === 0) return 0;
 
+  // Limite de cadastros por CNS+data+modalidade. CATARATA = 2: os dois olhos
+  // podem, sim, ser operados na MESMA data (cada olho é um procedimento) — só a
+  // 3ª ficha na mesma data é duplicata de verdade. Demais = 1.
+  const limite = (m: string | null | undefined) => (mod(m) === 'catarata' ? 2 : 1);
+
   const { data: cas } = await supabaseAdmin.from('clinic_accounts').select('id').eq('tenant_id', tenantId);
   const caIds = (cas ?? []).map((c) => c.id);
-  const jaCad = new Set<string>();
+  // Contagem de JÁ cadastrados por chave (não mais um Set: agora importa QUANTOS).
+  const contagem = new Map<string, number>();
   if (caIds.length > 0) {
     const { data: reg } = await supabaseAdmin
       .from('patient_records')
@@ -183,25 +192,38 @@ export async function marcarDuplicados(uploadId: number, tenantId: number): Prom
       .in('clinic_account_id', caIds)
       .in('status', ['registered', 'verified_ok', 'verified_divergent', 'done_manually']);
     for (const r of (reg ?? []) as { cns: string | null; data_atendimento: string | null; modalidade: string | null }[]) {
-      if (r.cns && r.data_atendimento) jaCad.add(`${r.cns}|${r.data_atendimento}|${mod(r.modalidade)}`);
+      if (r.cns && r.data_atendimento) {
+        const k = `${r.cns}|${r.data_atendimento}|${mod(r.modalidade)}`;
+        contagem.set(k, (contagem.get(k) ?? 0) + 1);
+      }
     }
   }
 
-  const vistos = new Set<string>();
-  const dupIds: number[] = [];
+  // Um pendente é duplicata quando a chave já atingiu o limite (contando o que
+  // está cadastrado + o que já apareceu antes nesta mesma lista).
+  const dupOci: number[] = [];
+  const dupCatarata: number[] = [];
   for (const p of pendentes) {
     if (!p.cns || !p.data_atendimento) continue;
     const chave = `${p.cns}|${p.data_atendimento}|${mod(p.modalidade)}`;
-    if (jaCad.has(chave) || vistos.has(chave)) dupIds.push(p.id);
-    else vistos.add(chave);
+    const atual = contagem.get(chave) ?? 0;
+    if (atual >= limite(p.modalidade)) {
+      (mod(p.modalidade) === 'catarata' ? dupCatarata : dupOci).push(p.id);
+    } else {
+      contagem.set(chave, atual + 1);
+    }
   }
-  if (dupIds.length > 0) {
-    await supabaseAdmin
-      .from('patient_records')
+  if (dupOci.length > 0) {
+    await supabaseAdmin.from('patient_records')
       .update({ status: 'needs_review', error_message: 'Cadastro duplicado — mesmo CNS já cadastrado nesta data de atendimento.' })
-      .in('id', dupIds);
+      .in('id', dupOci);
   }
-  return dupIds.length;
+  if (dupCatarata.length > 0) {
+    await supabaseAdmin.from('patient_records')
+      .update({ status: 'needs_review', error_message: 'Cadastro duplicado — catarata já tem 2 cadastros (os dois olhos) nesta data. A 3ª ficha não será cadastrada.' })
+      .in('id', dupCatarata);
+  }
+  return dupOci.length + dupCatarata.length;
 }
 
 /**

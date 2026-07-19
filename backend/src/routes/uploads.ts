@@ -23,44 +23,59 @@ const MSG_DUPLICADO = 'Cadastro duplicado — mesmo CNS já cadastrado nesta dat
 async function marcarDuplicados(uploadId: number, tenantId: number): Promise<number> {
   const { data: pend } = await (supabaseAdmin as any)
     .from('patient_records')
-    .select('id, cns, data_atendimento')
+    .select('id, cns, data_atendimento, modalidade')
     .eq('upload_id', uploadId)
     .eq('status', 'pending_registration')
     .order('id', { ascending: true });
-  const pendentes = (pend ?? []) as { id: number; cns: string | null; data_atendimento: string | null }[];
+  const pendentes = (pend ?? []) as { id: number; cns: string | null; data_atendimento: string | null; modalidade: string | null }[];
   if (pendentes.length === 0) return 0;
 
-  // Cadastros já existentes (mesmo assinante) — chave CNS|data.
+  // MESMA REGRA do worker (workers/src/lib/repo.ts). Antes esta cópia ignorava a
+  // modalidade e o caso dos dois olhos — catarata na mesma data caía como
+  // duplicata e catarata podia colidir com OCI. Chave = CNS+data+modalidade,
+  // com limite 2 para catarata (dois olhos) e 1 para o resto.
+  const mod = (m: string | null | undefined) => (m === 'catarata' ? 'catarata' : 'oci');
+  const limite = (m: string | null | undefined) => (mod(m) === 'catarata' ? 2 : 1);
+
   const { data: cas } = await supabaseAdmin.from('clinic_accounts').select('id').eq('tenant_id', tenantId);
   const caIds = (cas ?? []).map((c) => c.id);
-  const jaCadastrados = new Set<string>();
+  const contagem = new Map<string, number>();
   if (caIds.length > 0) {
     const { data: reg } = await (supabaseAdmin as any)
       .from('patient_records')
-      .select('cns, data_atendimento')
+      .select('cns, data_atendimento, modalidade')
       .in('clinic_account_id', caIds)
       .in('status', ['registered', 'verified_ok', 'verified_divergent', 'done_manually']);
-    for (const r of (reg ?? []) as { cns: string | null; data_atendimento: string | null }[]) {
-      if (r.cns && r.data_atendimento) jaCadastrados.add(`${r.cns}|${r.data_atendimento}`);
+    for (const r of (reg ?? []) as { cns: string | null; data_atendimento: string | null; modalidade: string | null }[]) {
+      if (r.cns && r.data_atendimento) {
+        const k = `${r.cns}|${r.data_atendimento}|${mod(r.modalidade)}`;
+        contagem.set(k, (contagem.get(k) ?? 0) + 1);
+      }
     }
   }
 
-  // Marca duplicados: contra os já cadastrados OU repetidos na própria lista.
-  const vistos = new Set<string>();
-  const dupIds: number[] = [];
+  const dupOci: number[] = [];
+  const dupCatarata: number[] = [];
   for (const p of pendentes) {
     if (!p.cns || !p.data_atendimento) continue;
-    const chave = `${p.cns}|${p.data_atendimento}`;
-    if (jaCadastrados.has(chave) || vistos.has(chave)) dupIds.push(p.id);
-    else vistos.add(chave);
+    const chave = `${p.cns}|${p.data_atendimento}|${mod(p.modalidade)}`;
+    const atual = contagem.get(chave) ?? 0;
+    if (atual >= limite(p.modalidade)) {
+      (mod(p.modalidade) === 'catarata' ? dupCatarata : dupOci).push(p.id);
+    } else {
+      contagem.set(chave, atual + 1);
+    }
   }
-  if (dupIds.length > 0) {
-    await (supabaseAdmin as any)
-      .from('patient_records')
-      .update({ status: 'needs_review', error_message: MSG_DUPLICADO })
-      .in('id', dupIds);
+  if (dupOci.length > 0) {
+    await (supabaseAdmin as any).from('patient_records')
+      .update({ status: 'needs_review', error_message: MSG_DUPLICADO }).in('id', dupOci);
   }
-  return dupIds.length;
+  if (dupCatarata.length > 0) {
+    await (supabaseAdmin as any).from('patient_records')
+      .update({ status: 'needs_review', error_message: 'Cadastro duplicado — catarata já tem 2 cadastros (os dois olhos) nesta data. A 3ª ficha não será cadastrada.' })
+      .in('id', dupCatarata);
+  }
+  return dupOci.length + dupCatarata.length;
 }
 
 /**
