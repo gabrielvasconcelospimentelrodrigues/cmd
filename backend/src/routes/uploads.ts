@@ -23,11 +23,11 @@ const MSG_DUPLICADO = 'Cadastro duplicado — mesmo CNS já cadastrado nesta dat
 async function marcarDuplicados(uploadId: number, tenantId: number): Promise<number> {
   const { data: pend } = await (supabaseAdmin as any)
     .from('patient_records')
-    .select('id, cns, data_atendimento, modalidade')
+    .select('id, cns, data_atendimento, modalidade, forcar_cadastro')
     .eq('upload_id', uploadId)
     .eq('status', 'pending_registration')
     .order('id', { ascending: true });
-  const pendentes = (pend ?? []) as { id: number; cns: string | null; data_atendimento: string | null; modalidade: string | null }[];
+  const pendentes = (pend ?? []) as { id: number; cns: string | null; data_atendimento: string | null; modalidade: string | null; forcar_cadastro?: boolean }[];
   if (pendentes.length === 0) return 0;
 
   // MESMA REGRA do worker (workers/src/lib/repo.ts). Antes esta cópia ignorava a
@@ -58,6 +58,7 @@ async function marcarDuplicados(uploadId: number, tenantId: number): Promise<num
   const dupCatarata: number[] = [];
   for (const p of pendentes) {
     if (!p.cns || !p.data_atendimento) continue;
+    if (p.forcar_cadastro) continue; // operador mandou ignorar a duplicidade
     const chave = `${p.cns}|${p.data_atendimento}|${mod(p.modalidade)}`;
     const atual = contagem.get(chave) ?? 0;
     if (atual >= limite(p.modalidade)) {
@@ -437,9 +438,14 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Selecione um terminal de automação para este envio antes de tentar reenviar.' });
     }
 
-    await supabaseAdmin.from('patient_records').update({ status: 'pending_registration', error_message: '' }).eq('id', id);
+    // forcar=true: o operador mandou cadastrar mesmo marcado como duplicado.
+    // Grava a flag para o worker pular TODA a dedup neste registro.
+    const forcar = ((req.body ?? {}) as { forcar?: boolean }).forcar === true;
+    await supabaseAdmin.from('patient_records')
+      .update({ status: 'pending_registration', error_message: '', ...(forcar ? { forcar_cadastro: true } : {}) } as any)
+      .eq('id', id);
     await registrationQueue().add('registrar', { uploadId: (pr as any).upload_id });
-    return { ok: true };
+    return { ok: true, forcado: forcar };
   });
 
   // ---- Pendências: marcar como feito manualmente ---------------------------

@@ -127,7 +127,7 @@ export interface PendentePaciente {
 export async function listarPendentes(uploadId: number): Promise<PendentePaciente[]> {
   const { data } = await supabaseAdmin
     .from('patient_records')
-    .select('id, nome, cns, data_nascimento, data_atendimento, cid10_codigo, medico_nome, modalidade, automation_overrides')
+    .select('id, nome, cns, data_nascimento, data_atendimento, cid10_codigo, medico_nome, modalidade, automation_overrides, forcar_cadastro')
     .eq('upload_id', uploadId)
     .eq('status', 'pending_registration')
     .order('id', { ascending: true });
@@ -169,11 +169,11 @@ export async function marcarDuplicados(uploadId: number, tenantId: number): Prom
   const mod = (m: string | null | undefined) => (m === 'catarata' ? 'catarata' : 'oci');
   const { data: pend } = await supabaseAdmin
     .from('patient_records')
-    .select('id, cns, data_atendimento, modalidade')
+    .select('id, cns, data_atendimento, modalidade, forcar_cadastro')
     .eq('upload_id', uploadId)
     .eq('status', 'pending_registration')
     .order('id', { ascending: true });
-  const pendentes = (pend ?? []) as { id: number; cns: string | null; data_atendimento: string | null; modalidade: string | null }[];
+  const pendentes = (pend ?? []) as { id: number; cns: string | null; data_atendimento: string | null; modalidade: string | null; forcar_cadastro?: boolean }[];
   if (pendentes.length === 0) return 0;
 
   // Limite de cadastros por CNS+data+modalidade. CATARATA = 2: os dois olhos
@@ -205,6 +205,7 @@ export async function marcarDuplicados(uploadId: number, tenantId: number): Prom
   const dupCatarata: number[] = [];
   for (const p of pendentes) {
     if (!p.cns || !p.data_atendimento) continue;
+    if ((p as { forcar_cadastro?: boolean }).forcar_cadastro) continue; // operador forçou
     const chave = `${p.cns}|${p.data_atendimento}|${mod(p.modalidade)}`;
     const atual = contagem.get(chave) ?? 0;
     if (atual >= limite(p.modalidade)) {

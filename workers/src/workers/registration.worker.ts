@@ -245,7 +245,12 @@ export function startRegistrationWorker(): Worker<UploadJob> {
               // como duplicado, para tratamento manual (envio manual).
               // Dedup considera a MODALIDADE: catarata só é duplicada se mesma
               // data (mesmo olho/dia) — olhos em dias diferentes sobem normal.
-              if (await jaCadastrado(conta.id, p.cns, p.data_atendimento, p.id, pd.modalidade)) {
+              // FORÇAR: o operador mandou cadastrar ignorando a duplicidade.
+              // Pula as três checagens (nosso banco + busca no CMD).
+              const forcado = (p as { forcar_cadastro?: boolean }).forcar_cadastro === true;
+              if (forcado) await logEntry(uploadId, 'WARN', `${p.nome || p.cns}: cadastro FORÇADO pelo operador — ignorando a checagem de duplicidade.`);
+
+              if (!forcado && await jaCadastrado(conta.id, p.cns, p.data_atendimento, p.id, pd.modalidade)) {
                 await marcarPaciente(p.id, 'needs_review', 'Cadastro duplicado — mesmo CNS já cadastrado nesta data de atendimento (mesma modalidade).');
                 await logEntry(uploadId, 'WARN', `${p.nome || p.cns}: duplicado (mesmo CNS+data+modalidade) — enviado para Pendências.`);
                 await atualizarContadores(uploadId, registered, errored);
@@ -256,8 +261,8 @@ export function startRegistrationWorker(): Worker<UploadJob> {
               // (retry que salvou, lista excluída, cadastro manual). OCI: já ter
               // 1 contato basta p/ pular; Catarata: até 2 (os dois olhos).
               const limiteCmd = pd.modalidade === 'catarata' ? 2 : 1;
-              const nCmdAntes = await comTimeout(automator.contarContatosNoCmd(pd.cns), 40_000, 'busca-cmd').catch(() => -1);
-              if (nCmdAntes >= limiteCmd) {
+              const nCmdAntes = forcado ? -1 : await comTimeout(automator.contarContatosNoCmd(pd.cns), 40_000, 'busca-cmd').catch(() => -1);
+              if (!forcado && nCmdAntes >= limiteCmd) {
                 await marcarPaciente(p.id, 'needs_review', `Já cadastrado no CMD-COLETA (${nCmdAntes} contato[s]) — não recadastrado para evitar duplicidade.`);
                 await logEntry(uploadId, 'WARN', `${p.nome || p.cns}: ${nCmdAntes} contato(s) já no CMD (limite ${limiteCmd}) — pulado (anti-duplicidade).`);
                 await atualizarContadores(uploadId, registered, errored);
