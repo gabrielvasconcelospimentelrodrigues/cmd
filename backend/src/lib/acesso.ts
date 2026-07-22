@@ -79,27 +79,11 @@ export async function verificarAcessoAutomacao(tenant: TenantAcesso): Promise<Ac
     };
   }
 
-  // 2) Uso dos terminais: precisa de ao menos UMA fatura paga (mensalidade ou
-  // a proporcional de quem contratou no meio do mês).
-  const { data: pagas } = await (supabaseAdmin as any)
-    .from('faturas')
-    .select('id')
-    .eq('tenant_id', tenant.id)
-    .in('tipo', TIPOS_USO_TERMINAL)
-    .eq('status', 'pago')
-    .limit(1);
-
-  if (!pagas || pagas.length === 0) {
-    return {
-      liberado: false,
-      motivo: 'mensalidade_pendente',
-      mensagem: 'Você não tem permissão para realizar automação: é necessário contratar os terminais e pagar a mensalidade.',
-      valor_implantacao: valorImplantacao,
-      valor_vencido: 0,
-    };
-  }
-
-  // 3) Inadimplência (regra que já existia): fatura em aberto e vencida.
+  // 2) Em dia com as faturas. A mensalidade deixou de ser uma exigência à parte:
+  // liberar a implantação já dá acesso, e a recorrência é cobrada por faturas
+  // COM DATA. Enquanto nenhuma vencer, o acesso segue; a 1ª que passar do
+  // vencimento bloqueia (inadimplência). Assim o pagamento parcelado da
+  // implantação e a mensalidade paga por fora se resolvem só com lançamentos.
   const hoje = new Date().toISOString().slice(0, 10);
   const { data: vencidas } = await (supabaseAdmin as any)
     .from('faturas')

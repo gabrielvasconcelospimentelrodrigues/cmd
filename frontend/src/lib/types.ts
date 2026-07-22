@@ -192,6 +192,8 @@ export interface Fatura {
   created_at: string;
   /** Página de pagamento no Asaas (PIX/boleto/cartão). Null enquanto não emitida. */
   link_pagamento?: string | null;
+  /** true = lançada manualmente pelo super admin (paga por fora do Asaas). */
+  pago_manual?: boolean;
   empresas?: { nome: string } | null;
 }
 

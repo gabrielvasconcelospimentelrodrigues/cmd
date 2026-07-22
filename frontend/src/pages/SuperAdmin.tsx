@@ -1548,6 +1548,7 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
   const [loading, setLoading] = useState(false);
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [busy, setBusy] = useState<number | 'gerar' | 'terminais' | null>(null);
+  const [lancar, setLancar] = useState(false); // modal de lançamento manual
 
   const carregarFaturas = useCallback(async (id: number) => {
     try { setFaturas(await apiGet<Fatura[]>(`/admin/tenants/${id}/faturas`)); } catch { setFaturas([]); }
@@ -1599,6 +1600,15 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
     } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); } finally { setBusy(null); }
   };
 
+  const lancarPagamento = async (dados: Record<string, unknown>) => {
+    if (!sel) return;
+    await apiPost(`/admin/tenants/${sel}/lancamento`, dados);
+    await abrir(sel);
+    await carregarFaturas(sel);
+    setLancar(false);
+    showToast({ title: 'Lançamento registrado', msg: 'A fatura aparece também no painel do cliente.', kind: 'ok' });
+  };
+
   const gerarMensalidade = async () => {
     if (!sel) return;
     setBusy('gerar');
@@ -1627,6 +1637,27 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
           <Card style={{ padding: 30, color: 'var(--c-ink3)', fontSize: 14 }}>Carregando…</Card>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {(() => {
+              // Status de acesso (mesma regra do gate): mostra AO super admin o
+              // porquê de o cliente estar liberado ou bloqueado, para saber o
+              // que lançar.
+              const hoje = new Date().toISOString().slice(0, 10);
+              const ate = (plano as any).isento_ate as string | null;
+              const isentoVig = !!(plano as any).isento_pagamento && (!ate || ate >= hoje);
+              const implOk = plano.implantacao_paga || Number(plano.valor_implantacao) === 0;
+              const vencidas = faturas.filter((f) => f.status === 'aberto' && f.vencimento < hoje);
+              const liberado = isentoVig || (implOk && vencidas.length === 0);
+              const motivo = isentoVig ? 'isento' : !implOk ? 'implantação não liberada' : vencidas.length ? `${vencidas.length} fatura(s) vencida(s)` : 'em dia';
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 15px', borderRadius: 10, background: liberado ? 'var(--c-oksoft)' : 'var(--c-errsoft)', border: `1px solid ${liberado ? 'var(--c-ok)' : 'var(--c-err)'}` }}>
+                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: liberado ? 'var(--c-ok)' : 'var(--c-err)' }} />
+                  <span style={{ fontSize: 13.5, fontWeight: 700, color: liberado ? 'var(--c-okfg)' : 'var(--c-errfg)' }}>
+                    {liberado ? 'ACESSO LIBERADO' : 'ACESSO BLOQUEADO'}
+                  </span>
+                  <span style={{ fontSize: 12.5, color: 'var(--c-ink3)' }}>· {motivo}</span>
+                </div>
+              );
+            })()}
             <div className="r-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
               <Mini label="Mensalidade total" v={brl(plano.mensal)} c="var(--c-softfg)" />
               <Mini label="Terminais alocados" v={String(plano.total_terminais)} />
@@ -1703,7 +1734,10 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
             <Card style={{ overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--c-border)' }}>
                 <span style={{ color: 'var(--c-ink3)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em' }}>Faturamento ({faturas.length})</span>
-                <button onClick={gerarMensalidade} disabled={busy === 'gerar'} className="ia-btn-outline" style={{ padding: '0 12px', height: 32, fontSize: 13 }}>{busy === 'gerar' ? 'Gerando…' : 'Gerar mensalidade do mês'}</button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => setLancar(true)} className="ia-btn-outline" style={{ padding: '0 12px', height: 32, fontSize: 13 }}>Lançar pagamento manual</button>
+                  <button onClick={gerarMensalidade} disabled={busy === 'gerar'} className="ia-btn-outline" style={{ padding: '0 12px', height: 32, fontSize: 13 }}>{busy === 'gerar' ? 'Gerando…' : 'Gerar mensalidade (Asaas)'}</button>
+                </div>
               </div>
               {faturas.length === 0 ? (
                 <div style={{ padding: 18, color: 'var(--c-ink3)', fontSize: 13 }}>Nenhuma fatura. Gere a mensalidade do mês para começar.</div>
@@ -1713,7 +1747,10 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
                 return (
                   <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '13px 20px', borderBottom: '1px solid var(--c-border)' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 600 }}>{f.descricao || f.tipo}</div>
+                      <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 7 }}>
+                        {f.descricao || f.tipo}
+                        {f.pago_manual && <span style={{ flex: 'none', fontSize: 10, fontWeight: 700, color: 'var(--c-softfg)', background: 'var(--c-soft)', padding: '1px 7px', borderRadius: 999 }}>MANUAL</span>}
+                      </div>
                       <div style={{ color: 'var(--c-ink3)', fontSize: 12 }}>ref {f.referencia} · vence {f.vencimento}{f.empresas?.nome ? ` · ${f.empresas.nome}` : ''}</div>
                     </div>
                     <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 700, width: 96, textAlign: 'right' }}>{brl(f.valor)}</div>
@@ -1732,6 +1769,8 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
                 <EmpresaLinha key={e.id} e={e} onRevogar={revogarTerminal} busy={busy === e.id} />
               ))}
             </Card>
+
+            {lancar && <LancamentoModal implantacaoLiberada={!!plano.implantacao_paga} onClose={() => setLancar(false)} onLancar={lancarPagamento} onErr={(m) => showToast({ title: 'Falha', msg: m, kind: 'err' })} />}
           </div>
         )}
       </div>
@@ -1765,6 +1804,87 @@ function EmpresaLinha({ e, onRevogar, busy }: { e: Plano['empresas'][number]; on
 
 function Mini({ label, v, c }: { label: string; v: string; c?: string }) {
   return <Card style={{ padding: 16 }}><div style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{label}</div><div style={{ color: c ?? 'var(--c-ink)', fontSize: 22, fontWeight: 800, marginTop: 2 }}>{v}</div></Card>;
+}
+
+/**
+ * Lançamento manual de pagamento (sem Asaas). Cobre mensalidade paga por fora e
+ * implantação parcelada (1ª parcela paga + parcelas a vencer). Toda fatura sai
+ * marcada como manual e aparece no Meu Plano do cliente.
+ */
+function LancamentoModal({ implantacaoLiberada, onClose, onLancar, onErr }: { implantacaoLiberada: boolean; onClose: () => void; onLancar: (d: Record<string, unknown>) => Promise<void>; onErr: (m: string) => void }) {
+  const [tipo, setTipo] = useState<'mensalidade' | 'implantacao' | 'avulso'>('mensalidade');
+  const [valor, setValor] = useState('');
+  const [pago, setPago] = useState(true); // pago por fora x parcela a vencer
+  const [vencimento, setVencimento] = useState('');
+  const [descricao, setDescricao] = useState('');
+  const [liberar, setLiberar] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const salvar = async () => {
+    const v = Number(String(valor).replace(',', '.'));
+    if (!(v > 0)) return onErr('Informe um valor maior que zero.');
+    if (!pago && !vencimento) return onErr('Parcela a vencer precisa de uma data de vencimento.');
+    setBusy(true);
+    try {
+      await onLancar({ tipo, valor: v, pago, vencimento: pago ? undefined : vencimento, descricao: descricao.trim() || undefined, liberar_implantacao: tipo === 'implantacao' && liberar });
+    } catch (e) { onErr((e as Error).message); } finally { setBusy(false); }
+  };
+
+  return (
+    <div onClick={() => !busy && onClose()} style={{ position: 'fixed', inset: 0, zIndex: 120, background: 'rgba(7,11,22,.7)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} className="ia-card" style={{ width: 480, maxWidth: '100%', padding: 26, animation: 'ia-slide .22s ease' }}>
+        <h3 style={{ color: 'var(--c-ink)', fontSize: 19, fontWeight: 700, margin: 0 }}>Lançar pagamento manual</h3>
+        <p style={{ color: 'var(--c-ink3)', fontSize: 12.5, margin: '6px 0 0', lineHeight: 1.5 }}>Fora do Asaas. Registra no plano do cliente e aparece no Meu Plano dele marcado como <b>manual</b>.</p>
+
+        <label className="ia-label" style={{ marginTop: 18 }}>Tipo</label>
+        <div style={{ display: 'flex', gap: 6, background: 'var(--c-surface2)', padding: 4, borderRadius: 10 }}>
+          {([['mensalidade', 'Mensalidade'], ['implantacao', 'Implantação'], ['avulso', 'Avulso']] as const).map(([k, lbl]) => (
+            <button key={k} onClick={() => setTipo(k)} style={{ flex: 1, padding: '8px 0', borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 700, background: tipo === k ? 'var(--c-surface)' : 'transparent', color: tipo === k ? 'var(--c-ink)' : 'var(--c-ink3)', boxShadow: tipo === k ? 'var(--c-shadow)' : 'none' }}>{lbl}</button>
+          ))}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 14 }}>
+          <div>
+            <label className="ia-label">Valor (R$)</label>
+            <input value={valor} onChange={(e) => setValor(e.target.value)} className="ia-input" placeholder="2000,00" inputMode="decimal" />
+          </div>
+          <div>
+            <label className="ia-label">Situação</label>
+            <div style={{ display: 'flex', gap: 6, background: 'var(--c-surface2)', padding: 4, borderRadius: 10 }}>
+              <button onClick={() => setPago(true)} style={{ flex: 1, padding: '8px 0', borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, background: pago ? 'var(--c-surface)' : 'transparent', color: pago ? 'var(--c-okfg)' : 'var(--c-ink3)' }}>Pago</button>
+              <button onClick={() => setPago(false)} style={{ flex: 1, padding: '8px 0', borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, background: !pago ? 'var(--c-surface)' : 'transparent', color: !pago ? 'var(--c-warnfg)' : 'var(--c-ink3)' }}>A vencer</button>
+            </div>
+          </div>
+        </div>
+
+        {!pago && (
+          <div style={{ marginTop: 12 }}>
+            <label className="ia-label">Vence em</label>
+            <input type="date" value={vencimento} onChange={(e) => setVencimento(e.target.value)} className="ia-input" style={{ width: 'auto' }} />
+            <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 5 }}>Parcela a vencer: se passar da data sem pagar, o acesso do cliente bloqueia.</div>
+          </div>
+        )}
+
+        <label className="ia-label" style={{ marginTop: 12 }}>Descrição (opcional)</label>
+        <input value={descricao} onChange={(e) => setDescricao(e.target.value)} className="ia-input" placeholder={tipo === 'implantacao' ? 'Ex: Implantação — 1ª parcela' : 'Ex: Mensalidade julho (PIX)'} />
+
+        {tipo === 'implantacao' && !implantacaoLiberada && (
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, marginTop: 14, padding: '11px 13px', borderRadius: 10, background: liberar ? 'var(--c-oksoft)' : 'var(--c-surface2)', border: `1px solid ${liberar ? 'var(--c-ok)' : 'var(--c-border)'}`, cursor: 'pointer' }}>
+            <input type="checkbox" checked={liberar} onChange={(e) => setLiberar(e.target.checked)} style={{ marginTop: 2, accentColor: 'var(--c-blued)' }} />
+            <span style={{ fontSize: 12.5, color: 'var(--c-ink2)', lineHeight: 1.5 }}>
+              <b>Liberar o acesso agora</b><br />
+              <span style={{ color: 'var(--c-ink3)' }}>Mesmo pago em parte, o cliente já usa a automação. As parcelas a vencer seguem cobrando.</span>
+            </span>
+          </label>
+        )}
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
+          <button onClick={onClose} disabled={busy} className="ia-btn-outline" style={{ flex: 1 }}>Cancelar</button>
+          <button onClick={salvar} disabled={busy} className="ia-btn" style={{ flex: 1.4, padding: 12 }}>{busy ? 'Lançando…' : 'Lançar'}</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 interface AuditLog { id: number; tenant_id: number | null; tenant_nome: string | null; usuario_id: string | null; categoria: string; acao: string; descricao: string; nivel: 'info' | 'sucesso' | 'alerta' | 'erro'; actor_nome: string | null; actor_email: string | null; actor_role: string | null; meta: Record<string, unknown> | null; criado_em: string }

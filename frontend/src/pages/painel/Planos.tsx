@@ -340,7 +340,10 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
             const podePagar = f.status !== 'pago' && !!f.link_pagamento;
             return (
               <div key={f.id} style={{ display: 'grid', gridTemplateColumns: '1fr 130px 130px 130px 110px 120px', alignItems: 'center', padding: '12px 20px', borderBottom: '1px solid var(--c-border)' }}>
-                <span style={{ color: 'var(--c-ink)', fontSize: 13, fontWeight: 600 }}>{f.descricao || f.tipo}</span>
+                <span style={{ color: 'var(--c-ink)', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {f.descricao || f.tipo}
+                  {f.pago_manual && <span title="Pagamento registrado manualmente pela equipe (fora do sistema de cobrança)" style={{ flex: 'none', fontSize: 9.5, fontWeight: 700, color: 'var(--c-softfg)', background: 'var(--c-soft)', padding: '1px 6px', borderRadius: 999 }}>MANUAL</span>}
+                </span>
                 <span style={{ color: 'var(--c-ink2)', fontSize: 13 }}>{f.referencia}</span>
                 <span style={{ color: 'var(--c-ink2)', fontSize: 13 }}>{f.vencimento.split('-').reverse().join('/')}</span>
                 <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 700 }}>{brl(f.valor)}</span>
@@ -354,7 +357,7 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
                       Pagar
                     </button>
                   ) : (
-                    <span style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{f.status === 'pago' ? '—' : 'em emissão'}</span>
+                    <span style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{f.status === 'pago' ? '—' : f.pago_manual ? 'combinar com a equipe' : 'em emissão'}</span>
                   )}
                 </span>
               </div>

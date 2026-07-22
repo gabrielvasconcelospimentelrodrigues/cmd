@@ -40,25 +40,9 @@ export async function verificarAcessoAutomacao(tenantId: number): Promise<Acesso
     };
   }
 
-  // Comprova pagamento do uso dos terminais. 'terminal_proporcional' conta:
-  // quem contrata no MEIO do mês paga o pró-rata e só recebe a 1ª mensalidade
-  // cheia no ciclo seguinte — sem isso ficaria bloqueado mesmo pagando certo.
-  const { data: pagas } = await (supabaseAdmin as any)
-    .from('faturas')
-    .select('id')
-    .eq('tenant_id', tenantId)
-    .in('tipo', ['mensalidade', 'terminal_proporcional'])
-    .eq('status', 'pago')
-    .limit(1);
-
-  if (!pagas || pagas.length === 0) {
-    return {
-      liberado: false,
-      motivo: 'mensalidade_pendente',
-      mensagem: 'Automação bloqueada: o período de teste terminou e não há mensalidade paga. Regularize para voltar a cadastrar.',
-    };
-  }
-
+  // Acesso = implantação liberada + em dia. A mensalidade não é exigência à
+  // parte: é cobrada por faturas COM DATA e o bloqueio vem pela inadimplência
+  // abaixo (mesma regra do backend, lib/acesso.ts).
   const hoje = new Date().toISOString().slice(0, 10);
   const { data: vencidas } = await (supabaseAdmin as any)
     .from('faturas')

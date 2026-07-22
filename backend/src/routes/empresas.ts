@@ -121,8 +121,8 @@ export async function empresaRoutes(app: FastifyInstance): Promise<void> {
   app.get('/minhas-faturas', { preHandler: [app.authenticate] }, async (req) => {
     const { data } = await (supabaseAdmin as any)
       .from('faturas')
-      // link_pagamento: leva o cliente ao PIX/boleto/cartão da fatura no Asaas.
-      .select('id, tipo, descricao, referencia, valor, vencimento, status, pago_em, link_pagamento, empresas(nome)')
+      // pago_manual: fatura lançada pelo super admin (pago por fora do Asaas).
+      .select('id, tipo, descricao, referencia, valor, vencimento, status, pago_em, link_pagamento, pago_manual, empresas(nome)')
       .eq('tenant_id', req.tenant!.id)
       .order('vencimento', { ascending: false });
     return data ?? [];

@@ -642,6 +642,60 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return { ...data, ...(cobranca ?? {}) };
   });
 
+  /**
+   * LANÇAMENTO MANUAL — pagamento por fora do Asaas (PIX direto, dinheiro) ou
+   * parcela a vencer. Cria a fatura SEM cobrança no gateway. Cobre os dois
+   * casos que o super admin precisa:
+   *   - mensalidade paga por fora  -> { tipo:'mensalidade', pago:true }
+   *   - implantação parcelada      -> { tipo:'implantacao', pago:true, valor:10000,
+   *        liberar_implantacao:true } e depois { tipo:'implantacao', pago:false,
+   *        vencimento:'2026-08-15', valor:10000 } para a 2ª parcela.
+   *
+   * A fatura fica marcada como pago_manual para APARECER ao cliente no Meu
+   * Plano ("Pago manualmente") — o registro precisa ser visível para ele.
+   */
+  app.post('/admin/tenants/:id/lancamento', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+    const b = (req.body ?? {}) as {
+      tipo?: string; valor?: number; pago?: boolean; vencimento?: string;
+      referencia?: string; descricao?: string; liberar_implantacao?: boolean; pago_em?: string;
+    };
+    const tipo = ['mensalidade', 'implantacao', 'avulso'].includes(String(b.tipo)) ? String(b.tipo) : 'avulso';
+    const valor = Number(b.valor ?? 0);
+    if (!(valor > 0)) return reply.code(400).send({ error: 'Informe um valor maior que zero.' });
+    const pago = b.pago !== false; // padrão: já pago (por fora)
+
+    const hojeStr = new Date().toISOString().slice(0, 10);
+    // A vencer precisa de data futura; pago usa a data do pagamento (ou hoje).
+    if (!pago && !b.vencimento) return reply.code(400).send({ error: 'Parcela a vencer precisa de uma data de vencimento.' });
+    const vencimento = pago ? (b.pago_em ?? hojeStr) : String(b.vencimento);
+    const referencia = b.referencia ?? new Date().toISOString().slice(0, 7);
+    const rotuloTipo = tipo === 'mensalidade' ? 'Mensalidade' : tipo === 'implantacao' ? 'Implantação' : 'Lançamento';
+    const descricao = String(b.descricao ?? '').trim() || `${rotuloTipo} — ${pago ? 'pago manualmente' : 'parcela a vencer'}`;
+
+    const { data: fatura, error } = await (supabaseAdmin as any).from('faturas').insert({
+      tenant_id: id, tipo, descricao, referencia, valor, vencimento,
+      status: pago ? 'pago' : 'aberto',
+      pago_em: pago ? (b.pago_em ? new Date(b.pago_em).toISOString() : new Date().toISOString()) : null,
+      pago_manual: true, // sempre: lançamento é manual (não passou pelo Asaas)
+    }).select('*').single();
+    if (error) { req.log.error(error); return reply.code(500).send({ error: 'Falha ao lançar o pagamento.' }); }
+
+    // Liberação da implantação (acesso): opcional, no mesmo ato.
+    if (b.liberar_implantacao) {
+      await (supabaseAdmin as any).from('tenants').update({ implantacao_paga: true }).eq('id', id);
+    }
+
+    const { data: t } = await (supabaseAdmin as any).from('tenants').select('name').eq('id', id).maybeSingle();
+    await registrarLog({
+      tenantId: id, categoria: 'financeiro', acao: 'fatura.lancamento_manual', nivel: 'sucesso', ator: ator(req),
+      descricao: `${atorNome(req)} lançou ${pago ? 'pagamento' : 'parcela a vencer'} de ${brl(valor)} (${rotuloTipo}) para ${t?.name ?? 'o assinante'}${b.liberar_implantacao ? ' e liberou o acesso' : ''}.`,
+      meta: { fatura_id: fatura?.id, tipo, valor, pago, vencimento, liberou: !!b.liberar_implantacao },
+    });
+    return fatura;
+  });
+
   // Lançamentos da operação (nossos custos / receitas avulsas).
   app.get('/admin/lancamentos', { preHandler: app.authenticateSuperAdmin }, async (req) => {
     const comp = (req.query as { competencia?: string })?.competencia;
