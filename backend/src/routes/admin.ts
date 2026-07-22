@@ -9,6 +9,7 @@ import { getMotorConfig, type MotorConfig } from '../lib/motor-config';
 import { criarCobrancaAsaas } from '../lib/asaas';
 import { liberarTerminal } from '../lib/terminais';
 import { isencaoVigente } from '../lib/acesso';
+import { validaCpfCnpj, soDigitos } from '../lib/documento';
 import type { Database } from '../types/database';
 
 const brl = (v: number | string) =>
@@ -556,15 +557,27 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/admin/empresas/:id', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
-    const body = (req.body ?? {}) as { taxa_empresa?: number; taxa_paga?: boolean; nome?: string; cnpj?: string };
+    const { data: antes } = await (supabaseAdmin as any).from('empresas').select('cnpj').eq('id', id).maybeSingle();
+    const body = (req.body ?? {}) as { taxa_empresa?: number; taxa_paga?: boolean; nome?: string; cnpj?: string; responsavel?: string; telefone?: string };
     const patch: Record<string, unknown> = {};
     if (body.taxa_empresa !== undefined) patch.taxa_empresa = Number(body.taxa_empresa);
     if (typeof body.taxa_paga === 'boolean') patch.taxa_paga = body.taxa_paga;
     if (typeof body.nome === 'string' && body.nome.trim()) patch.nome = body.nome.trim();
-    if (typeof body.cnpj === 'string') patch.cnpj = body.cnpj.trim();
+    // CNPJ validado pelo dígito verificador (a cobrança do Asaas depende dele).
+    if (typeof body.cnpj === 'string') {
+      const doc = body.cnpj.trim();
+      if (doc && !validaCpfCnpj(doc)) return reply.code(400).send({ error: 'CPF/CNPJ inválido. Confira os dígitos.' });
+      patch.cnpj = doc;
+    }
+    if (typeof body.responsavel === 'string') patch.responsavel = body.responsavel.trim() || null;
+    if (typeof body.telefone === 'string') patch.telefone = body.telefone.trim() || null;
     if (Object.keys(patch).length === 0) return reply.code(400).send({ error: 'nada para atualizar.' });
     const { data, error } = await supabaseAdmin.from('empresas').update(patch as Database['public']['Tables']['empresas']['Update']).eq('id', id).select('*').maybeSingle();
     if (error || !data) { req.log.error(error); return reply.code(404).send({ error: 'empresa não encontrada.' }); }
+    // Documento mudou → zera o cliente Asaas da empresa (senão cobraria no dado antigo).
+    if (typeof body.cnpj === 'string' && soDigitos(body.cnpj) !== soDigitos((antes as any)?.cnpj)) {
+      await (supabaseAdmin as any).from('empresas').update({ asaas_customer_id: null }).eq('id', id);
+    }
     return data;
   });
 

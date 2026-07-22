@@ -7,6 +7,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { useTheme, LogoMark, useToast, Toast, PasswordField, type ToastData } from '../components/iacmd/ui';
 import ProfileSecurity from '../components/iacmd/ProfileSecurity';
 import WhatsAppFab from '../components/iacmd/WhatsAppFab';
+import { mascaraCpfCnpj, validaCpfCnpj } from '../lib/documento';
 import { apiGet, apiPost, apiPatch, apiDelete, apiPut } from '../lib/api';
 import { Switch, brl } from './painel/parts';
 import type { Plano, TerminalRequest, Fatura } from '../lib/types';
@@ -1547,8 +1548,10 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
   const [plano, setPlano] = useState<Plano | null>(null);
   const [loading, setLoading] = useState(false);
   const [faturas, setFaturas] = useState<Fatura[]>([]);
-  const [busy, setBusy] = useState<number | 'gerar' | 'terminais' | null>(null);
+  const [busy, setBusy] = useState<number | 'gerar' | 'terminais' | 'parcela' | null>(null);
   const [lancar, setLancar] = useState(false); // modal de lançamento manual
+  const [parcelaData, setParcelaData] = useState(''); // data da 2ª parcela da implantação
+  const [editarEmp, setEditarEmp] = useState<any | null>(null); // editar empresa (super admin)
 
   const carregarFaturas = useCallback(async (id: number) => {
     try { setFaturas(await apiGet<Fatura[]>(`/admin/tenants/${id}/faturas`)); } catch { setFaturas([]); }
@@ -1597,6 +1600,19 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
       await apiPost(`/admin/tenants/${sel}/terminais`, { quantidade });
       await abrir(sel);
       showToast({ title: quantidade > 0 ? 'Terminais concedidos' : 'Terminal removido', msg: 'Sem cobrança.', kind: 'ok' });
+    } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); } finally { setBusy(null); }
+  };
+
+  /** Agenda a 2ª parcela da implantação (fatura a vencer com o valor restante). */
+  const agendarParcelaImplantacao = async (restante: number) => {
+    if (!sel || !parcelaData) return;
+    setBusy('parcela');
+    try {
+      await apiPost(`/admin/tenants/${sel}/lancamento`, { tipo: 'implantacao', valor: restante, pago: false, vencimento: parcelaData, descricao: 'Implantação — 2ª parcela' });
+      setParcelaData('');
+      await carregarFaturas(sel);
+      await abrir(sel);
+      showToast({ title: '2ª parcela agendada', msg: 'Se vencer sem pagar, o acesso bloqueia.', kind: 'ok' });
     } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); } finally { setBusy(null); }
   };
 
@@ -1668,11 +1684,46 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
             <Card style={{ padding: 20 }}>
               <div style={{ color: 'var(--c-ink)', fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Plano do assinante</div>
               <div style={{ color: 'var(--c-ink3)', fontSize: 12.5, marginBottom: 14 }}>Os valores seguem a <b>Tabela de preços</b> (global, acima). {plano.total_terminais} terminal(is) → <b>{brl(plano.mensal)}/mês</b>. Próximo terminal custará <b>{brl((plano as { proximo_terminal?: number }).proximo_terminal ?? 0)}</b>.</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ color: 'var(--c-ink2)', fontSize: 13 }}>Implantação ({brl(plano.valor_implantacao)}) paga</span>
-                <Switch on={plano.implantacao_paga} onClick={() => patchTenant({ implantacao_paga: !plano.implantacao_paga })} />
-                <span style={{ fontSize: 12, color: plano.implantacao_paga ? 'var(--c-okfg)' : 'var(--c-warnfg)' }}>{plano.implantacao_paga ? 'paga' : 'pendente'}</span>
-              </div>
+              {(() => {
+                // Implantação parcelada: soma o que já foi pago e o que falta,
+                // a partir das faturas tipo 'implantacao'.
+                const total = Number(plano.valor_implantacao);
+                const implFaturas = faturas.filter((f) => f.tipo === 'implantacao');
+                const pagoImpl = implFaturas.filter((f) => f.status === 'pago').reduce((s, f) => s + Number(f.valor), 0);
+                const parcelaAberta = implFaturas.find((f) => f.status === 'aberto');
+                const restante = Math.max(0, total - pagoImpl);
+                const parcial = pagoImpl > 0 && pagoImpl < total;
+                return (
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <span style={{ color: 'var(--c-ink2)', fontSize: 13 }}>Implantação ({brl(total)})</span>
+                      <Switch on={plano.implantacao_paga} onClick={() => patchTenant({ implantacao_paga: !plano.implantacao_paga })} />
+                      <span style={{ fontSize: 12, fontWeight: 700, color: plano.implantacao_paga ? 'var(--c-okfg)' : 'var(--c-warnfg)' }}>
+                        {plano.implantacao_paga ? 'liberada' : 'pendente'}
+                      </span>
+                      {pagoImpl > 0 && (
+                        <span style={{ fontSize: 12, color: 'var(--c-ink3)' }}>
+                          · pago {brl(pagoImpl)}{parcial ? ` de ${brl(total)} · falta ${brl(restante)}` : ' (integral)'}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* 2ª parcela: campo de data ao lado, para agendar o restante. */}
+                    {parcial && !parcelaAberta && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 10, padding: '10px 12px', borderRadius: 9, background: 'var(--c-warnsoft)', border: '1px solid var(--c-warn)' }}>
+                        <span style={{ fontSize: 12.5, color: 'var(--c-warnfg)', fontWeight: 600 }}>Agendar 2ª parcela ({brl(restante)}):</span>
+                        <input type="date" value={parcelaData} onChange={(e) => setParcelaData(e.target.value)} className="ia-input" style={{ height: 32, width: 'auto', fontSize: 13 }} />
+                        <button onClick={() => agendarParcelaImplantacao(restante)} disabled={busy === 'parcela' || !parcelaData} className="ia-btn" style={{ height: 32, padding: '0 14px', fontSize: 13 }}>{busy === 'parcela' ? '…' : 'Agendar'}</button>
+                      </div>
+                    )}
+                    {parcelaAberta && (
+                      <div style={{ fontSize: 12, color: 'var(--c-ink3)', marginTop: 8 }}>
+                        2ª parcela de <b>{brl(Number(parcelaAberta.valor))}</b> agendada para {parcelaAberta.vencimento.split('-').reverse().join('/')}{parcelaAberta.vencimento < new Date().toISOString().slice(0, 10) ? ' · VENCIDA' : ''}.
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* ISENÇÃO: conta de teste / parceiro. Roda automação sem pagar —
                   por isso fica destacado, para não passar despercebido numa
@@ -1766,11 +1817,20 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
             <Card style={{ overflow: 'hidden' }}>
               <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--c-border)', color: 'var(--c-ink3)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em' }}>Empresas ({plano.empresas.length})</div>
               {plano.empresas.map((e) => (
-                <EmpresaLinha key={e.id} e={e} onRevogar={revogarTerminal} busy={busy === e.id} />
+                <EmpresaLinha key={e.id} e={e} onRevogar={revogarTerminal} onEditar={() => setEditarEmp(e)} busy={busy === e.id} />
               ))}
             </Card>
 
             {lancar && <LancamentoModal implantacaoLiberada={!!plano.implantacao_paga} onClose={() => setLancar(false)} onLancar={lancarPagamento} onErr={(m) => showToast({ title: 'Falha', msg: m, kind: 'err' })} />}
+
+            {editarEmp && (
+              <EditarEmpresaAdmin
+                empresa={editarEmp}
+                onClose={() => setEditarEmp(null)}
+                onSaved={async () => { const e = editarEmp; setEditarEmp(null); if (sel) await abrir(sel); showToast({ title: 'Empresa atualizada', msg: e.nome, kind: 'ok' }); }}
+                onErr={(m) => showToast({ title: 'Falha', msg: m, kind: 'err' })}
+              />
+            )}
           </div>
         )}
       </div>
@@ -1779,18 +1839,22 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
   );
 }
 
-function EmpresaLinha({ e, onRevogar, busy }: { e: Plano['empresas'][number]; onRevogar: (empresaId: number) => void; busy: boolean }) {
+function EmpresaLinha({ e, onRevogar, onEditar, busy }: { e: Plano['empresas'][number]; onRevogar: (empresaId: number) => void; onEditar: () => void; busy: boolean }) {
   const configurados = (e as { configurados?: number }).configurados ?? 0;
+  const docOk = validaCpfCnpj((e as any).cnpj);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', borderBottom: '1px solid var(--c-border)' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 600 }}>{e.nome}</div>
-        <div style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{e.cnpj || 'sem CNPJ'}{configurados > 0 ? ` · ${configurados} conectado(s)` : ''}</div>
+        <div style={{ color: docOk ? 'var(--c-ink3)' : 'var(--c-errfg)', fontSize: 12, fontWeight: docOk ? 400 : 700 }}>
+          {docOk ? e.cnpj : ((e as any).cnpj ? 'CNPJ inválido' : 'sem CNPJ')}{configurados > 0 ? ` · ${configurados} conectado(s)` : ''}
+        </div>
       </div>
       <div style={{ textAlign: 'right' }}>
         <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 600 }}>{e.terminais} terminal(is)</div>
         <div style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{brl(e.mensal)}/mês</div>
       </div>
+      <button onClick={onEditar} className="ia-btn-outline" style={{ padding: '0 12px', height: 34, fontSize: 13, flex: 'none' }}>Editar dados</button>
       <button
         onClick={() => onRevogar(e.id)}
         disabled={busy || e.terminais <= 0}
@@ -1804,6 +1868,54 @@ function EmpresaLinha({ e, onRevogar, busy }: { e: Plano['empresas'][number]; on
 
 function Mini({ label, v, c }: { label: string; v: string; c?: string }) {
   return <Card style={{ padding: 16 }}><div style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{label}</div><div style={{ color: c ?? 'var(--c-ink)', fontSize: 22, fontWeight: 800, marginTop: 2 }}>{v}</div></Card>;
+}
+
+/** Super admin edita os dados cadastrais da empresa (mesma validação do cliente). */
+function EditarEmpresaAdmin({ empresa, onClose, onSaved, onErr }: { empresa: any; onClose: () => void; onSaved: () => Promise<void>; onErr: (m: string) => void }) {
+  const [nome, setNome] = useState(empresa.nome ?? '');
+  const [cnpj, setCnpj] = useState(empresa.cnpj ?? '');
+  const [responsavel, setResponsavel] = useState(empresa.responsavel ?? '');
+  const [telefone, setTelefone] = useState(empresa.telefone ?? '');
+  const [busy, setBusy] = useState(false);
+  const docOk = validaCpfCnpj(cnpj);
+
+  const salvar = async () => {
+    if (!nome.trim()) return onErr('O nome da empresa é obrigatório.');
+    if (!docOk) return onErr('CPF/CNPJ inválido. Confira os dígitos.');
+    setBusy(true);
+    try {
+      await apiPatch(`/admin/empresas/${empresa.id}`, { nome: nome.trim(), cnpj: cnpj.trim(), responsavel: responsavel.trim(), telefone: telefone.trim() });
+      await onSaved();
+    } catch (e) { onErr((e as Error).message); setBusy(false); }
+  };
+
+  return (
+    <div onClick={() => !busy && onClose()} style={{ position: 'fixed', inset: 0, zIndex: 130, background: 'rgba(7,11,22,.7)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={(ev) => ev.stopPropagation()} className="ia-card" style={{ width: 460, maxWidth: '100%', padding: 26 }}>
+        <h3 style={{ color: 'var(--c-ink)', fontSize: 19, fontWeight: 700, margin: 0 }}>Dados da empresa</h3>
+        <p style={{ color: 'var(--c-ink3)', fontSize: 12.5, margin: '6px 0 0', lineHeight: 1.5 }}>Usados no faturamento. O CNPJ precisa estar correto — a cobrança do Asaas sai neste documento.</p>
+
+        <label className="ia-label" style={{ marginTop: 18 }}>Nome da empresa *</label>
+        <input value={nome} onChange={(ev) => setNome(ev.target.value)} className="ia-input" />
+
+        <label className="ia-label" style={{ marginTop: 12 }}>CPF ou CNPJ *</label>
+        <input value={cnpj} onChange={(ev) => setCnpj(mascaraCpfCnpj(ev.target.value))} className="ia-input" placeholder="00.000.000/0000-00" style={{ borderColor: cnpj && !docOk ? 'var(--c-err)' : undefined }} />
+        <div style={{ fontSize: 12, marginTop: 5, color: !cnpj ? 'var(--c-ink3)' : docOk ? 'var(--c-okfg)' : 'var(--c-err)' }}>
+          {!cnpj ? 'Obrigatório para emitir cobrança.' : docOk ? 'Documento válido.' : 'Inválido — confira os dígitos.'}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+          <div><label className="ia-label">Responsável</label><input value={responsavel} onChange={(ev) => setResponsavel(ev.target.value)} className="ia-input" /></div>
+          <div><label className="ia-label">Telefone</label><input value={telefone} onChange={(ev) => setTelefone(ev.target.value)} className="ia-input" /></div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
+          <button onClick={onClose} disabled={busy} className="ia-btn-outline" style={{ flex: 1 }}>Cancelar</button>
+          <button onClick={salvar} disabled={busy || !docOk} className="ia-btn" style={{ flex: 1.4, padding: 12 }}>{busy ? 'Salvando…' : 'Salvar'}</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /**
