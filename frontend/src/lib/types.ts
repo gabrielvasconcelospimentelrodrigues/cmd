@@ -148,6 +148,8 @@ export interface EmpresaPlano {
   id: number;
   nome: string;
   cnpj: string;
+  responsavel?: string | null;
+  telefone?: string | null;
   taxa_empresa: number;
   taxa_paga: boolean;
   terminais: number; // contratados (faturados)

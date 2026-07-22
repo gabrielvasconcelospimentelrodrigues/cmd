@@ -5,6 +5,7 @@ import {
   Loader2, AlertTriangle, XCircle, FileText, Bug, ScrollText, Play, Pause, Square,
   Cpu, Building2, Menu,
 } from 'lucide-react';
+import { validaCpfCnpj } from '../../lib/documento';
 import { useAuth } from '../../auth/AuthProvider';
 import { useTheme, LogoMark, useToast, Toast } from '../../components/iacmd/ui';
 import ProfileSecurity from '../../components/iacmd/ProfileSecurity';
@@ -71,6 +72,11 @@ export default function Painel() {
   // pagamento. Guardamos o motivo p/ o aviso e p/ desabilitar os botões.
   const [acesso, setAcesso] = useState<AcessoAutomacao | null>(null);
   const [avisoAberto, setAvisoAberto] = useState(false);
+  // Alerta de dados cadastrais incompletos (CNPJ da empresa). Reaparece a cada
+  // carregamento da página até o cliente corrigir — os dados são usados no
+  // faturamento e o Asaas precisa deles.
+  const [avisoEmpresa, setAvisoEmpresa] = useState(false);
+  const [avisoEmpresaVisto, setAvisoEmpresaVisto] = useState(false);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -100,6 +106,17 @@ export default function Painel() {
     sessionStorage.setItem('cmd_aviso_pagamento', '1');
     setAvisoAberto(true);
   }, [acesso]);
+  // Empresas com CNPJ faltando ou inválido — o dado é usado no faturamento.
+  const empresasIncompletas = useMemo(
+    () => (isMember ? [] : empresas.filter((e) => !validaCpfCnpj(e?.cnpj))),
+    [empresas, isMember],
+  );
+  // Abre o alerta 1x por carregamento da página (não some sozinho a cada poll;
+  // reaparece no próximo F5 enquanto houver empresa incompleta).
+  useEffect(() => {
+    if (empresasIncompletas.length > 0 && !avisoEmpresaVisto) setAvisoEmpresa(true);
+  }, [empresasIncompletas.length, avisoEmpresaVisto]);
+
   // Qualquer ação bloqueada (402), de qualquer tela, reabre o aviso.
   useEffect(() => {
     const abrir = (e: Event) => {
@@ -311,8 +328,52 @@ export default function Painel() {
           onClose={() => setAvisoAberto(false)}
         />
       )}
+      {avisoEmpresa && empresasIncompletas.length > 0 && (
+        <AvisoDadosEmpresa
+          empresas={empresasIncompletas}
+          onCompletar={() => { setAvisoEmpresa(false); setAvisoEmpresaVisto(true); setPage('planos'); }}
+          onClose={() => { setAvisoEmpresa(false); setAvisoEmpresaVisto(true); }}
+        />
+      )}
       <WhatsAppFab />
       <Toast data={toast} />
+    </div>
+  );
+}
+
+/* ============ AVISO: dados cadastrais da empresa incompletos ============
+ * O CNPJ é usado no faturamento (terminais ligados a ele, Asaas cobra nele).
+ * Reaparece a cada carregamento até estar correto — mas pode ser fechado. */
+function AvisoDadosEmpresa({ empresas, onCompletar, onClose }: { empresas: any[]; onCompletar: () => void; onClose: () => void }) {
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 96, background: 'rgba(7,11,22,.72)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} className="ia-card" style={{ width: 480, maxWidth: '100%', padding: 30, animation: 'ia-slide .22s ease' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
+          <div style={{ width: 46, height: 46, borderRadius: 12, background: 'var(--c-warnsoft)', color: 'var(--c-warn)', display: 'grid', placeItems: 'center', flexShrink: 0 }}><AlertTriangle size={22} /></div>
+          <div>
+            <h3 style={{ color: 'var(--c-ink)', fontSize: 20, fontWeight: 700, margin: 0 }}>Complete os dados de faturamento</h3>
+            <div style={{ color: 'var(--c-ink3)', fontSize: 13, marginTop: 2 }}>{empresas.length} empresa(s) com CPF/CNPJ faltando ou inválido.</div>
+          </div>
+        </div>
+
+        <p style={{ color: 'var(--c-ink2)', fontSize: 14, lineHeight: 1.65, margin: '18px 0 0' }}>
+          O <b>CPF/CNPJ da empresa</b> é usado no faturamento — os terminais são ligados a ele e as cobranças são emitidas nesse documento. Sem ele correto, não conseguimos gerar suas cobranças.
+        </p>
+
+        <div style={{ marginTop: 14, padding: '12px 14px', borderRadius: 10, background: 'var(--c-surface2)', border: '1px solid var(--c-border)' }}>
+          {empresas.map((e) => (
+            <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '3px 0', color: 'var(--c-ink2)' }}>
+              <AlertTriangle size={13} style={{ color: 'var(--c-warnfg)', flex: 'none' }} />
+              <b>{e.nome}</b><span style={{ color: 'var(--c-ink3)' }}>— {e.cnpj ? 'CNPJ inválido' : 'sem CNPJ'}</span>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
+          <button onClick={onClose} className="ia-btn-outline" style={{ flex: 1 }}>Agora não</button>
+          <button onClick={onCompletar} className="ia-btn" style={{ flex: 1.5, padding: 12 }}>Completar dados</button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Building2, Cpu, Plus, CheckCircle2, Clock, X, Users, Trash2, UserPlus, AlertTriangle } from 'lucide-react';
+import { Building2, Cpu, Plus, CheckCircle2, Clock, X, Users, Trash2, UserPlus, AlertTriangle, Pencil } from 'lucide-react';
 import { apiGet, apiPost, apiDelete, apiPatch } from '../../lib/api';
-import type { Plano, Tenant, TerminalRequest, Fatura, TenantMember, ClinicAccount } from '../../lib/types';
+import type { Plano, Tenant, TerminalRequest, Fatura, TenantMember, ClinicAccount, EmpresaPlano } from '../../lib/types';
 import { Card, brl } from './parts';
 import { mascaraCpfCnpj, validaCpfCnpj } from '../../lib/documento';
 
@@ -22,6 +22,7 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
   const [processando, setProcessando] = useState(false);
   const [verDetalhamento, setVerDetalhamento] = useState(false);
   const [equipeDe, setEquipeDe] = useState<{ id: number; nome: string } | null>(null); // modal de equipe da empresa
+  const [editarEmpresa, setEditarEmpresa] = useState<Plano['empresas'][number] | null>(null); // editar dados cadastrais
 
   const carregar = useCallback(async () => {
     try {
@@ -151,7 +152,13 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
                 <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--c-soft)', color: 'var(--c-softfg)', display: 'grid', placeItems: 'center', flex: 'none' }}><Building2 size={20} /></div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: 'var(--c-ink)', fontSize: 16, fontWeight: 700 }}>{e.nome}</div>
-                  <div className="ia-mono" style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{e.cnpj || 'sem CNPJ'}</div>
+                  {validaCpfCnpj((e as any).cnpj) ? (
+                    <div className="ia-mono" style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{e.cnpj}</div>
+                  ) : (
+                    <button onClick={() => setEditarEmpresa(e)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 2, background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit', color: 'var(--c-errfg)', fontSize: 12, fontWeight: 700 }}>
+                      <AlertTriangle size={13} /> {e.cnpj ? 'CNPJ inválido' : 'CNPJ faltando'} — completar
+                    </button>
+                  )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--c-ink2)', fontSize: 13, flex: 'none' }}>
                   <Cpu size={15} style={{ color: 'var(--c-softfg)' }} /> {e.terminais} terminal(is)
@@ -166,6 +173,7 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
                   Cota de terminais contratada: <b>{e.terminais}</b> terminal(is)
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <button onClick={() => setEditarEmpresa(e)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: '1px solid var(--c-border2)', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, color: 'var(--c-ink2)', padding: '7px 12px' }}><Pencil size={15} /> Editar dados</button>
                   <button onClick={() => setExcluirEmpresa({ id: e.id, nome: e.nome, terminais: e.terminais })} disabled={processando} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: '1px solid var(--c-border2)', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, color: 'var(--c-errfg)', padding: '7px 12px' }}><Trash2 size={15} /> Excluir</button>
                   <button onClick={() => setEquipeDe({ id: e.id, nome: e.nome })} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: '1px solid var(--c-border2)', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, color: 'var(--c-ink2)', padding: '7px 12px' }}><Users size={15} /> Equipe</button>
                   {e.terminais - (e.cancelar_terminais ?? 0) > 0 && (
@@ -382,6 +390,15 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
       {novaEmpresa && <NovaEmpresaModal onClose={() => setNovaEmpresa(false)} onSaved={async () => { setNovaEmpresa(false); await carregar(); showToast({ title: 'Empresa cadastrada', msg: 'A taxa será definida pelo administrador.', kind: 'ok' }); }} onErr={(m) => showToast({ title: 'Falha', msg: m, kind: 'err' })} />}
 
       {equipeDe && <EquipeModal empresa={equipeDe} onClose={() => setEquipeDe(null)} onChange={carregar} showToast={showToast} />}
+
+      {editarEmpresa && (
+        <EditarEmpresaModal
+          empresa={editarEmpresa}
+          onClose={() => setEditarEmpresa(null)}
+          onSaved={async () => { setEditarEmpresa(null); await carregar(); if (onChange) await onChange(); showToast({ title: 'Dados atualizados', msg: 'Serão usados no faturamento.', kind: 'ok' }); }}
+          onErr={(m) => showToast({ title: 'Falha', msg: m, kind: 'err' })}
+        />
+      )}
 
       {confirmar && (
         <div onClick={() => setConfirmar(null)} style={{ position: 'fixed', inset: 0, zIndex: 110, background: 'rgba(7,11,22,.62)', backdropFilter: 'blur(3px)', display: 'grid', placeItems: 'center', padding: 20 }}>
@@ -925,6 +942,64 @@ function FormCartao({ fatura, onPago }: { fatura: { id: number; valor: number };
             cliente precisa saber: que não fica preso. */}
         Renovação mensal neste cartão — <b style={{ color: 'var(--c-ink2)' }}>cancele quando quiser</b>.<br />
         Pagamento processado pelo Asaas. Não guardamos os dados do seu cartão.
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Editar dados cadastrais da empresa (faturamento). O CNPJ é validado pelos
+ * dígitos verificadores — os terminais são ligados a ele e o Asaas precisa do
+ * documento correto para emitir as cobranças.
+ */
+function EditarEmpresaModal({ empresa, onClose, onSaved, onErr }: { empresa: EmpresaPlano; onClose: () => void; onSaved: () => Promise<void>; onErr: (m: string) => void }) {
+  const [nome, setNome] = useState(empresa.nome ?? '');
+  const [cnpj, setCnpj] = useState(empresa.cnpj ?? '');
+  const [responsavel, setResponsavel] = useState(empresa.responsavel ?? '');
+  const [telefone, setTelefone] = useState(empresa.telefone ?? '');
+  const [busy, setBusy] = useState(false);
+  const docOk = validaCpfCnpj(cnpj);
+
+  const salvar = async () => {
+    if (!nome.trim()) return onErr('O nome da empresa é obrigatório.');
+    if (!docOk) return onErr('CPF/CNPJ inválido. Confira os dígitos — falta ou sobra algum número.');
+    setBusy(true);
+    try {
+      await apiPatch(`/empresas/${empresa.id}`, { nome: nome.trim(), cnpj: cnpj.trim(), responsavel: responsavel.trim(), telefone: telefone.trim() });
+      await onSaved();
+    } catch (e) { onErr((e as Error).message); setBusy(false); }
+  };
+
+  return (
+    <div onClick={() => !busy && onClose()} style={{ position: 'fixed', inset: 0, zIndex: 130, background: 'rgba(7,11,22,.7)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} className="ia-card" style={{ width: 460, maxWidth: '100%', padding: 26, animation: 'ia-slide .22s ease' }}>
+        <h3 style={{ color: 'var(--c-ink)', fontSize: 19, fontWeight: 700, margin: 0 }}>Dados da empresa</h3>
+        <p style={{ color: 'var(--c-ink3)', fontSize: 12.5, margin: '6px 0 0', lineHeight: 1.5 }}>Usados no faturamento. O CNPJ precisa estar correto — os terminais são ligados a ele e as cobranças saem neste documento.</p>
+
+        <label className="ia-label" style={{ marginTop: 18 }}>Nome da empresa *</label>
+        <input value={nome} onChange={(e) => setNome(e.target.value)} className="ia-input" placeholder="Razão social" />
+
+        <label className="ia-label" style={{ marginTop: 12 }}>CPF ou CNPJ *</label>
+        <input value={cnpj} onChange={(e) => setCnpj(mascaraCpfCnpj(e.target.value))} className="ia-input" placeholder="00.000.000/0000-00" style={{ borderColor: cnpj && !docOk ? 'var(--c-err)' : undefined }} />
+        <div style={{ fontSize: 12, marginTop: 5, color: !cnpj ? 'var(--c-ink3)' : docOk ? 'var(--c-okfg)' : 'var(--c-err)' }}>
+          {!cnpj ? 'Obrigatório para emitir cobrança.' : docOk ? 'Documento válido.' : 'Inválido — confira os dígitos.'}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+          <div>
+            <label className="ia-label">Responsável</label>
+            <input value={responsavel} onChange={(e) => setResponsavel(e.target.value)} className="ia-input" placeholder="Nome" />
+          </div>
+          <div>
+            <label className="ia-label">Telefone</label>
+            <input value={telefone} onChange={(e) => setTelefone(e.target.value)} className="ia-input" placeholder="(11) 99876-5432" />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
+          <button onClick={onClose} disabled={busy} className="ia-btn-outline" style={{ flex: 1 }}>Cancelar</button>
+          <button onClick={salvar} disabled={busy || !docOk} className="ia-btn" style={{ flex: 1.4, padding: 12 }}>{busy ? 'Salvando…' : 'Salvar'}</button>
+        </div>
       </div>
     </div>
   );

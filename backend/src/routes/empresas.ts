@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../lib/supabase';
 import { registrarLog, ator, atorNome } from '../lib/audit';
 import { getPrecos, precoTerminalNaPosicao } from '../lib/precos';
 import { pixDaCobranca, boletoDaCobranca, pagarComCartao, criarAssinaturaCartao } from '../lib/asaas';
+import { validaCpfCnpj, soDigitos } from '../lib/documento';
 
 /**
  * Monta o resumo do PLANO de um assinante (tenant):
@@ -48,7 +49,7 @@ export async function montarPlano(tenantId: number) {
   await aplicarCancelamentosVencidos(tenantId);
 
   const [{ data: empresas }, { data: contas }] = await Promise.all([
-    (supabaseAdmin as any).from('empresas').select('id, nome, cnpj, taxa_empresa, taxa_paga, terminais_contratados, cancelar_terminais, cancelar_em').eq('tenant_id', tenantId).order('id', { ascending: true }),
+    (supabaseAdmin as any).from('empresas').select('id, nome, cnpj, responsavel, telefone, taxa_empresa, taxa_paga, terminais_contratados, cancelar_terminais, cancelar_em').eq('tenant_id', tenantId).order('id', { ascending: true }),
     supabaseAdmin.from('clinic_accounts').select('id, empresa_id').eq('tenant_id', tenantId),
   ]);
 
@@ -72,6 +73,8 @@ export async function montarPlano(tenantId: number) {
       id: e.id,
       nome: e.nome,
       cnpj: e.cnpj,
+      responsavel: e.responsavel ?? null,
+      telefone: e.telefone ?? null,
       taxa_empresa: Number(e.taxa_empresa),
       taxa_paga: e.taxa_paga,
       terminais, // contratados (faturados)
@@ -291,7 +294,7 @@ export async function empresaRoutes(app: FastifyInstance): Promise<void> {
   app.get('/empresas', { preHandler: [app.authenticate] }, async (req) => {
     let query = supabaseAdmin
       .from('empresas')
-      .select('id, nome, cnpj, taxa_empresa, taxa_paga, terminais_contratados, created_at')
+      .select('id, nome, cnpj, responsavel, telefone, taxa_empresa, taxa_paga, terminais_contratados, created_at')
       .eq('tenant_id', req.tenant!.id);
 
     if (req.member) {
@@ -309,6 +312,11 @@ export async function empresaRoutes(app: FastifyInstance): Promise<void> {
   app.post('/empresas', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
     const body = (req.body ?? {}) as { nome?: string; cnpj?: string };
     if (!body.nome || !body.nome.trim()) return reply.code(400).send({ error: 'nome da empresa é obrigatório.' });
+    // CNPJ é opcional na criação (o cliente pode completar depois pelo alerta),
+    // mas se vier, tem de ser válido — a cobrança do Asaas depende dele.
+    if (body.cnpj && body.cnpj.trim() && !validaCpfCnpj(body.cnpj)) {
+      return reply.code(400).send({ error: 'CPF/CNPJ inválido. Confira os dígitos.' });
+    }
     const { data, error } = await supabaseAdmin
       .from('empresas')
       .insert({ tenant_id: req.tenant!.id, nome: body.nome.trim(), cnpj: (body.cnpj ?? '').trim() })
@@ -324,6 +332,51 @@ export async function empresaRoutes(app: FastifyInstance): Promise<void> {
       meta: { empresa_id: data.id },
     });
     return reply.code(201).send(data);
+  });
+
+  /**
+   * EDITAR EMPRESA — dados cadastrais de faturamento (nome, CNPJ, contato).
+   * Não existia edição; o cliente não tinha como corrigir um CNPJ errado.
+   * O CNPJ é validado pelos dígitos verificadores porque a cobrança do Asaas
+   * depende dele. Trocar o documento zera o cliente Asaas da empresa (o Asaas
+   * casa pagamento por esse id; manter o antigo cobraria com o dado errado).
+   */
+  app.patch('/empresas/:id', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+    const { data: emp } = await (supabaseAdmin as any)
+      .from('empresas').select('id, cnpj').eq('id', id).eq('tenant_id', req.tenant!.id).maybeSingle();
+    if (!emp) return reply.code(404).send({ error: 'Empresa não encontrada.' });
+
+    const body = (req.body ?? {}) as { nome?: string; cnpj?: string; responsavel?: string; telefone?: string };
+    const patch: Record<string, unknown> = {};
+    if (body.nome !== undefined) {
+      if (!body.nome.trim()) return reply.code(400).send({ error: 'O nome da empresa não pode ficar vazio.' });
+      patch.nome = body.nome.trim();
+    }
+    if (body.cnpj !== undefined) {
+      const doc = body.cnpj.trim();
+      if (doc && !validaCpfCnpj(doc)) return reply.code(400).send({ error: 'CPF/CNPJ inválido. Confira os dígitos — falta ou sobra algum número.' });
+      patch.cnpj = doc;
+    }
+    if (body.responsavel !== undefined) patch.responsavel = body.responsavel.trim() || null;
+    if (body.telefone !== undefined) patch.telefone = body.telefone.trim() || null;
+    if (Object.keys(patch).length === 0) return reply.code(400).send({ error: 'Nada para atualizar.' });
+
+    const { data, error } = await (supabaseAdmin as any)
+      .from('empresas').update(patch).eq('id', id).select('id, nome, cnpj, responsavel, telefone').single();
+    if (error) return reply.code(400).send({ error: error.message });
+
+    // Documento mudou → o cliente Asaas da empresa ficou defasado.
+    if (body.cnpj !== undefined && soDigitos(body.cnpj) !== soDigitos(emp.cnpj)) {
+      await (supabaseAdmin as any).from('empresas').update({ asaas_customer_id: null }).eq('id', id);
+    }
+    await registrarLog({
+      tenantId: req.tenant!.id, categoria: 'empresa', acao: 'empresa.editada', nivel: 'info', ator: ator(req),
+      descricao: `${atorNome(req)} atualizou os dados da empresa ${data.nome}.`,
+      meta: { empresa_id: id },
+    });
+    return data;
   });
 
   // Descontratar (cancelar) 1 terminal — cobrança segue até o fim do período

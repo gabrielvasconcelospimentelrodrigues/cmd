@@ -249,9 +249,42 @@ export async function garantirClienteAsaas(tenantId: number): Promise<string> {
   return criado.id;
 }
 
+/**
+ * Cliente Asaas de uma EMPRESA (cada CNPJ é um cliente lá). Usado quando a
+ * fatura é de uma empresa específica — os terminais são ligados ao CNPJ da
+ * empresa, então a cobrança sai no documento dela, não no do assinante.
+ * Cai para o cliente do assinante se a empresa não tiver CNPJ válido.
+ */
+export async function garantirClienteAsaasEmpresa(empresaId: number, tenantId: number): Promise<string> {
+  const { data: e } = await (supabaseAdmin as any)
+    .from('empresas').select('id, nome, cnpj, responsavel, telefone, asaas_customer_id, tenant_id')
+    .eq('id', empresaId).maybeSingle();
+
+  // Sem empresa ou sem CNPJ válido → usa o cliente do assinante (comportamento antigo).
+  if (!e || !documentoValido(e.cnpj)) return garantirClienteAsaas(tenantId);
+  if (e.asaas_customer_id) return e.asaas_customer_id as string;
+
+  const { data: t } = await (supabaseAdmin as any)
+    .from('tenants').select('owner_user_id').eq('id', e.tenant_id).maybeSingle();
+  const { data: u } = t ? await (supabaseAdmin as any).auth.admin.getUserById(t.owner_user_id) : { data: null };
+  const email = u?.user?.email ?? undefined;
+
+  const criado = await chamar<{ id: string }>('/customers', 'POST', {
+    name: e.nome,
+    cpfCnpj: documentoValido(e.cnpj),
+    email,
+    mobilePhone: String(e.telefone ?? '').replace(/\D/g, '') || undefined,
+    externalReference: `empresa:${e.id}`,
+    notificationDisabled: false,
+  });
+  await (supabaseAdmin as any).from('empresas').update({ asaas_customer_id: criado.id }).eq('id', e.id);
+  return criado.id;
+}
+
 interface FaturaParaCobranca {
   id: number;
   tenant_id: number;
+  empresa_id?: number | null;
   valor: number | string;
   vencimento: string;
   descricao: string | null;
@@ -271,7 +304,10 @@ export async function criarCobrancaAsaas(fatura: FaturaParaCobranca): Promise<Co
   if (!asaasAtivo()) return null;
 
   try {
-    const customer = await garantirClienteAsaas(fatura.tenant_id);
+    // Fatura de uma empresa → cobra no CNPJ da empresa; senão, no do assinante.
+    const customer = fatura.empresa_id
+      ? await garantirClienteAsaasEmpresa(fatura.empresa_id, fatura.tenant_id)
+      : await garantirClienteAsaas(fatura.tenant_id);
     const pagamento = await chamar<{ id: string; invoiceUrl: string }>('/payments', 'POST', {
       customer,
       billingType: 'UNDEFINED',
