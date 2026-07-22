@@ -660,6 +660,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const b = (req.body ?? {}) as {
       tipo?: string; valor?: number; pago?: boolean; vencimento?: string;
       referencia?: string; descricao?: string; liberar_implantacao?: boolean; pago_em?: string;
+      // Parcelas a vencer criadas no MESMO ato (ex.: a 2ª parcela da implantação).
+      parcelas?: { valor?: number; vencimento?: string; descricao?: string }[];
+      // Atrela N terminais sem cobrança (ex.: pagou a 1ª mensalidade -> ganha o terminal).
+      atrelar_terminais?: number;
     };
     const tipo = ['mensalidade', 'implantacao', 'avulso'].includes(String(b.tipo)) ? String(b.tipo) : 'avulso';
     const valor = Number(b.valor ?? 0);
@@ -674,24 +678,58 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const rotuloTipo = tipo === 'mensalidade' ? 'Mensalidade' : tipo === 'implantacao' ? 'Implantação' : 'Lançamento';
     const descricao = String(b.descricao ?? '').trim() || `${rotuloTipo} — ${pago ? 'pago manualmente' : 'parcela a vencer'}`;
 
-    const { data: fatura, error } = await (supabaseAdmin as any).from('faturas').insert({
+    // Fatura principal (a entrada paga, ou a única).
+    const linhas: Record<string, unknown>[] = [{
       tenant_id: id, tipo, descricao, referencia, valor, vencimento,
       status: pago ? 'pago' : 'aberto',
       pago_em: pago ? (b.pago_em ? new Date(b.pago_em).toISOString() : new Date().toISOString()) : null,
-      pago_manual: true, // sempre: lançamento é manual (não passou pelo Asaas)
-    }).select('*').single();
+      pago_manual: true,
+    }];
+    // Parcelas restantes (a vencer) — registradas junto, com data para cobrar.
+    for (const p of (b.parcelas ?? [])) {
+      const pv = Number(p.valor ?? 0);
+      if (!(pv > 0) || !p.vencimento) return reply.code(400).send({ error: 'Cada parcela precisa de valor e vencimento.' });
+      linhas.push({
+        tenant_id: id, tipo, referencia,
+        descricao: String(p.descricao ?? '').trim() || `${rotuloTipo} — parcela a vencer`,
+        valor: pv, vencimento: String(p.vencimento), status: 'aberto', pago_em: null, pago_manual: true,
+      });
+    }
+
+    const { data: criadas, error } = await (supabaseAdmin as any).from('faturas').insert(linhas).select('*');
     if (error) { req.log.error(error); return reply.code(500).send({ error: 'Falha ao lançar o pagamento.' }); }
+    const fatura = (criadas ?? [])[0];
 
     // Liberação da implantação (acesso): opcional, no mesmo ato.
     if (b.liberar_implantacao) {
       await (supabaseAdmin as any).from('tenants').update({ implantacao_paga: true }).eq('id', id);
     }
 
+    // Atrela terminais sem cobrança (o pagamento da mensalidade já dá o terminal).
+    const nTerm = Math.trunc(Number(b.atrelar_terminais ?? 0));
+    if (nTerm > 0) {
+      const { data: emps } = await (supabaseAdmin as any)
+        .from('empresas').select('id, terminais_contratados').eq('tenant_id', id).order('id', { ascending: true });
+      if (emps?.length) {
+        const alvo = emps[0];
+        await (supabaseAdmin as any).from('empresas')
+          .update({ terminais_contratados: Number(alvo.terminais_contratados ?? 0) + nTerm }).eq('id', alvo.id);
+        const { data: tt } = await (supabaseAdmin as any).from('tenants').select('max_terminais').eq('id', id).maybeSingle();
+        await (supabaseAdmin as any).from('tenants')
+          .update({ max_terminais: Number(tt?.max_terminais ?? 0) + nTerm }).eq('id', id);
+      }
+    }
+
     const { data: t } = await (supabaseAdmin as any).from('tenants').select('name').eq('id', id).maybeSingle();
+    const extras = [
+      b.liberar_implantacao ? 'liberou o acesso' : '',
+      (b.parcelas?.length ?? 0) > 0 ? `${b.parcelas!.length} parcela(s) a vencer` : '',
+      nTerm > 0 ? `atrelou ${nTerm} terminal(is)` : '',
+    ].filter(Boolean).join(', ');
     await registrarLog({
       tenantId: id, categoria: 'financeiro', acao: 'fatura.lancamento_manual', nivel: 'sucesso', ator: ator(req),
-      descricao: `${atorNome(req)} lançou ${pago ? 'pagamento' : 'parcela a vencer'} de ${brl(valor)} (${rotuloTipo}) para ${t?.name ?? 'o assinante'}${b.liberar_implantacao ? ' e liberou o acesso' : ''}.`,
-      meta: { fatura_id: fatura?.id, tipo, valor, pago, vencimento, liberou: !!b.liberar_implantacao },
+      descricao: `${atorNome(req)} lançou ${pago ? 'pagamento' : 'parcela a vencer'} de ${brl(valor)} (${rotuloTipo}) para ${t?.name ?? 'o assinante'}${extras ? ' · ' + extras : ''}.`,
+      meta: { fatura_id: fatura?.id, tipo, valor, pago, vencimento, liberou: !!b.liberar_implantacao, parcelas: b.parcelas?.length ?? 0, atrelou: nTerm },
     });
     return fatura;
   });

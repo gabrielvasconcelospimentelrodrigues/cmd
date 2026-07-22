@@ -1812,21 +1812,43 @@ function Mini({ label, v, c }: { label: string; v: string; c?: string }) {
  * marcada como manual e aparece no Meu Plano do cliente.
  */
 function LancamentoModal({ implantacaoLiberada, onClose, onLancar, onErr }: { implantacaoLiberada: boolean; onClose: () => void; onLancar: (d: Record<string, unknown>) => Promise<void>; onErr: (m: string) => void }) {
-  const [tipo, setTipo] = useState<'mensalidade' | 'implantacao' | 'avulso'>('mensalidade');
+  const [tipo, setTipo] = useState<'mensalidade' | 'implantacao' | 'avulso'>('implantacao');
   const [valor, setValor] = useState('');
   const [pago, setPago] = useState(true); // pago por fora x parcela a vencer
   const [vencimento, setVencimento] = useState('');
   const [descricao, setDescricao] = useState('');
-  const [liberar, setLiberar] = useState(false);
+  const [liberar, setLiberar] = useState(true); // implantação: libera acesso por padrão
+  // Implantação parcelada: 2ª parcela (valor + data) registrada no mesmo ato.
+  const [parcelaValor, setParcelaValor] = useState('');
+  const [parcelaVenc, setParcelaVenc] = useState('');
+  // Mensalidade: atrela o terminal que o cliente pagou.
+  const [terminais, setTerminais] = useState('0');
   const [busy, setBusy] = useState(false);
 
+  const num = (s: string) => Number(String(s).replace(',', '.'));
+
   const salvar = async () => {
-    const v = Number(String(valor).replace(',', '.'));
+    const v = num(valor);
     if (!(v > 0)) return onErr('Informe um valor maior que zero.');
     if (!pago && !vencimento) return onErr('Parcela a vencer precisa de uma data de vencimento.');
+    const parcelas: { valor: number; vencimento: string }[] = [];
+    if (tipo === 'implantacao' && parcelaValor.trim()) {
+      const pv = num(parcelaValor);
+      if (!(pv > 0)) return onErr('Valor da 2ª parcela inválido.');
+      if (!parcelaVenc) return onErr('Informe a data de vencimento da 2ª parcela.');
+      parcelas.push({ valor: pv, vencimento: parcelaVenc });
+    }
+    const nTerm = Math.trunc(num(terminais));
     setBusy(true);
     try {
-      await onLancar({ tipo, valor: v, pago, vencimento: pago ? undefined : vencimento, descricao: descricao.trim() || undefined, liberar_implantacao: tipo === 'implantacao' && liberar });
+      await onLancar({
+        tipo, valor: v, pago,
+        vencimento: pago ? undefined : vencimento,
+        descricao: descricao.trim() || undefined,
+        liberar_implantacao: tipo === 'implantacao' && liberar,
+        parcelas: parcelas.length ? parcelas : undefined,
+        atrelar_terminais: nTerm > 0 ? nTerm : undefined,
+      });
     } catch (e) { onErr((e as Error).message); } finally { setBusy(false); }
   };
 
@@ -1866,16 +1888,47 @@ function LancamentoModal({ implantacaoLiberada, onClose, onLancar, onErr }: { im
         )}
 
         <label className="ia-label" style={{ marginTop: 12 }}>Descrição (opcional)</label>
-        <input value={descricao} onChange={(e) => setDescricao(e.target.value)} className="ia-input" placeholder={tipo === 'implantacao' ? 'Ex: Implantação — 1ª parcela' : 'Ex: Mensalidade julho (PIX)'} />
+        <input value={descricao} onChange={(e) => setDescricao(e.target.value)} className="ia-input" placeholder={tipo === 'implantacao' ? 'Ex: Implantação — 1ª parcela (entrada)' : 'Ex: Mensalidade julho (PIX)'} />
 
-        {tipo === 'implantacao' && !implantacaoLiberada && (
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, marginTop: 14, padding: '11px 13px', borderRadius: 10, background: liberar ? 'var(--c-oksoft)' : 'var(--c-surface2)', border: `1px solid ${liberar ? 'var(--c-ok)' : 'var(--c-border)'}`, cursor: 'pointer' }}>
-            <input type="checkbox" checked={liberar} onChange={(e) => setLiberar(e.target.checked)} style={{ marginTop: 2, accentColor: 'var(--c-blued)' }} />
-            <span style={{ fontSize: 12.5, color: 'var(--c-ink2)', lineHeight: 1.5 }}>
-              <b>Liberar o acesso agora</b><br />
-              <span style={{ color: 'var(--c-ink3)' }}>Mesmo pago em parte, o cliente já usa a automação. As parcelas a vencer seguem cobrando.</span>
-            </span>
-          </label>
+        {/* IMPLANTAÇÃO: 2ª parcela agendada + liberar acesso no mesmo ato. */}
+        {tipo === 'implantacao' && (
+          <>
+            <div style={{ marginTop: 14, padding: '13px 15px', borderRadius: 10, background: 'var(--c-surface2)', border: '1px solid var(--c-border)' }}>
+              <div style={{ color: 'var(--c-ink2)', fontSize: 13, fontWeight: 600 }}>Parcela restante (a vencer) — opcional</div>
+              <div style={{ color: 'var(--c-ink3)', fontSize: 12, margin: '4px 0 10px', lineHeight: 1.5 }}>Registra a 2ª parcela com data. Se vencer sem pagar, o acesso bloqueia.</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div>
+                  <label className="ia-label">Valor restante (R$)</label>
+                  <input value={parcelaValor} onChange={(e) => setParcelaValor(e.target.value)} className="ia-input" placeholder="10000,00" inputMode="decimal" />
+                </div>
+                <div>
+                  <label className="ia-label">Vence em</label>
+                  <input type="date" value={parcelaVenc} onChange={(e) => setParcelaVenc(e.target.value)} className="ia-input" />
+                </div>
+              </div>
+            </div>
+
+            {!implantacaoLiberada && (
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, marginTop: 12, padding: '11px 13px', borderRadius: 10, background: liberar ? 'var(--c-oksoft)' : 'var(--c-surface2)', border: `1px solid ${liberar ? 'var(--c-ok)' : 'var(--c-border)'}`, cursor: 'pointer' }}>
+                <input type="checkbox" checked={liberar} onChange={(e) => setLiberar(e.target.checked)} style={{ marginTop: 2, accentColor: 'var(--c-blued)' }} />
+                <span style={{ fontSize: 12.5, color: 'var(--c-ink2)', lineHeight: 1.5 }}>
+                  <b>Liberar o acesso agora</b><br />
+                  <span style={{ color: 'var(--c-ink3)' }}>Mesmo pago em parte, o cliente já usa a automação. As parcelas a vencer seguem cobrando.</span>
+                </span>
+              </label>
+            )}
+          </>
+        )}
+
+        {/* MENSALIDADE: atrela o terminal que o cliente pagou. */}
+        {tipo === 'mensalidade' && (
+          <div style={{ marginTop: 14 }}>
+            <label className="ia-label">Atrelar terminais (o cliente pagou por eles)</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input value={terminais} onChange={(e) => setTerminais(e.target.value.replace(/\D/g, ''))} className="ia-input" style={{ width: 80 }} inputMode="numeric" />
+              <span style={{ color: 'var(--c-ink3)', fontSize: 12.5, lineHeight: 1.5 }}>terminal(is) liberado(s) sem gerar outra fatura.</span>
+            </div>
+          </div>
         )}
 
         <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
