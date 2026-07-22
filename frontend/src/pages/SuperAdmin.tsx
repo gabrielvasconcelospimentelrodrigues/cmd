@@ -1552,6 +1552,7 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
   const [lancar, setLancar] = useState(false); // modal de lançamento manual
   const [parcelaData, setParcelaData] = useState(''); // data da 2ª parcela da implantação
   const [editarEmp, setEditarEmp] = useState<any | null>(null); // editar empresa (super admin)
+  const [editarFatura, setEditarFatura] = useState<Fatura | null>(null); // corrigir fatura lançada errada
 
   const carregarFaturas = useCallback(async (id: number) => {
     try { setFaturas(await apiGet<Fatura[]>(`/admin/tenants/${id}/faturas`)); } catch { setFaturas([]); }
@@ -1601,6 +1602,23 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
       await abrir(sel);
       showToast({ title: quantidade > 0 ? 'Terminais concedidos' : 'Terminal removido', msg: 'Sem cobrança.', kind: 'ok' });
     } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); } finally { setBusy(null); }
+  };
+
+  const excluirFatura = async (f: Fatura) => {
+    if (!window.confirm(`Excluir a fatura "${f.descricao || f.tipo}" (${brl(f.valor)})? Isso não pode ser desfeito.`)) return;
+    setBusy(f.id);
+    try {
+      await apiDelete(`/admin/faturas/${f.id}`);
+      if (sel) { await carregarFaturas(sel); await abrir(sel); }
+      showToast({ title: 'Fatura excluída', msg: '', kind: 'ok' });
+    } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); } finally { setBusy(null); }
+  };
+
+  const salvarFatura = async (f: Fatura, campos: { valor: number; vencimento: string; descricao: string }) => {
+    await apiPatch(`/admin/faturas/${f.id}`, campos);
+    if (sel) { await carregarFaturas(sel); await abrir(sel); }
+    setEditarFatura(null);
+    showToast({ title: 'Fatura atualizada', msg: '', kind: 'ok' });
   };
 
   /** Agenda a 2ª parcela da implantação (fatura a vencer com o valor restante). */
@@ -1712,7 +1730,7 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
                     {parcial && !parcelaAberta && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 10, padding: '10px 12px', borderRadius: 9, background: 'var(--c-warnsoft)', border: '1px solid var(--c-warn)' }}>
                         <span style={{ fontSize: 12.5, color: 'var(--c-warnfg)', fontWeight: 600 }}>Agendar 2ª parcela ({brl(restante)}):</span>
-                        <input type="date" value={parcelaData} onChange={(e) => setParcelaData(e.target.value)} className="ia-input" style={{ height: 32, width: 'auto', fontSize: 13 }} />
+                        <input type="date" min={new Date().toISOString().slice(0, 10)} value={parcelaData} onChange={(e) => setParcelaData(e.target.value)} className="ia-input" style={{ height: 32, width: 'auto', fontSize: 13 }} />
                         <button onClick={() => agendarParcelaImplantacao(restante)} disabled={busy === 'parcela' || !parcelaData} className="ia-btn" style={{ height: 32, padding: '0 14px', fontSize: 13 }}>{busy === 'parcela' ? '…' : 'Agendar'}</button>
                       </div>
                     )}
@@ -1809,6 +1827,8 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
                     <button onClick={() => baixa(f, f.status !== 'pago')} disabled={busy === f.id} className="ia-btn-outline" style={{ padding: '0 12px', height: 32, fontSize: 13, width: 92 }}>
                       {busy === f.id ? '…' : f.status === 'pago' ? 'Reabrir' : 'Dar baixa'}
                     </button>
+                    <button onClick={() => setEditarFatura(f)} disabled={busy === f.id} title="Editar fatura" className="ia-btn-outline" style={{ padding: 0, height: 32, width: 32, display: 'grid', placeItems: 'center' }}><Pencil size={14} /></button>
+                    <button onClick={() => excluirFatura(f)} disabled={busy === f.id} title="Excluir fatura" className="ia-btn-outline" style={{ padding: 0, height: 32, width: 32, display: 'grid', placeItems: 'center', color: 'var(--c-errfg)' }}><Trash2 size={14} /></button>
                   </div>
                 );
               })}
@@ -1828,6 +1848,15 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
                 empresa={editarEmp}
                 onClose={() => setEditarEmp(null)}
                 onSaved={async () => { const e = editarEmp; setEditarEmp(null); if (sel) await abrir(sel); showToast({ title: 'Empresa atualizada', msg: e.nome, kind: 'ok' }); }}
+                onErr={(m) => showToast({ title: 'Falha', msg: m, kind: 'err' })}
+              />
+            )}
+
+            {editarFatura && (
+              <EditarFaturaModal
+                fatura={editarFatura}
+                onClose={() => setEditarFatura(null)}
+                onSalvar={salvarFatura}
                 onErr={(m) => showToast({ title: 'Falha', msg: m, kind: 'err' })}
               />
             )}
@@ -1868,6 +1897,45 @@ function EmpresaLinha({ e, onRevogar, onEditar, busy }: { e: Plano['empresas'][n
 
 function Mini({ label, v, c }: { label: string; v: string; c?: string }) {
   return <Card style={{ padding: 16 }}><div style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{label}</div><div style={{ color: c ?? 'var(--c-ink)', fontSize: 22, fontWeight: 800, marginTop: 2 }}>{v}</div></Card>;
+}
+
+/** Corrigir uma fatura lançada errada (valor, vencimento, descrição). */
+function EditarFaturaModal({ fatura, onClose, onSalvar, onErr }: { fatura: Fatura; onClose: () => void; onSalvar: (f: Fatura, c: { valor: number; vencimento: string; descricao: string }) => Promise<void>; onErr: (m: string) => void }) {
+  const [valor, setValor] = useState(String(fatura.valor));
+  const [vencimento, setVencimento] = useState(fatura.vencimento);
+  const [descricao, setDescricao] = useState(fatura.descricao || '');
+  const [busy, setBusy] = useState(false);
+  const paga = fatura.status === 'pago';
+
+  const salvar = async () => {
+    const v = Number(String(valor).replace(',', '.'));
+    if (!(v > 0)) return onErr('Valor deve ser maior que zero.');
+    if (!vencimento) return onErr('Informe o vencimento.');
+    setBusy(true);
+    try { await onSalvar(fatura, { valor: v, vencimento, descricao: descricao.trim() }); }
+    catch (e) { onErr((e as Error).message); setBusy(false); }
+  };
+
+  return (
+    <div onClick={() => !busy && onClose()} style={{ position: 'fixed', inset: 0, zIndex: 130, background: 'rgba(7,11,22,.7)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={(ev) => ev.stopPropagation()} className="ia-card" style={{ width: 440, maxWidth: '100%', padding: 26 }}>
+        <h3 style={{ color: 'var(--c-ink)', fontSize: 19, fontWeight: 700, margin: 0 }}>Editar fatura</h3>
+        <p style={{ color: 'var(--c-ink3)', fontSize: 12.5, margin: '6px 0 0' }}>Corrija o que foi lançado errado. {paga ? 'Fatura já paga — o vencimento é só registro.' : 'Se tiver cobrança no Asaas, ela é atualizada.'}</p>
+
+        <label className="ia-label" style={{ marginTop: 16 }}>Descrição</label>
+        <input value={descricao} onChange={(ev) => setDescricao(ev.target.value)} className="ia-input" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+          <div><label className="ia-label">Valor (R$)</label><input value={valor} onChange={(ev) => setValor(ev.target.value)} className="ia-input" inputMode="decimal" /></div>
+          <div><label className="ia-label">Vencimento</label><input type="date" value={vencimento} onChange={(ev) => setVencimento(ev.target.value)} className="ia-input" /></div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
+          <button onClick={onClose} disabled={busy} className="ia-btn-outline" style={{ flex: 1 }}>Cancelar</button>
+          <button onClick={salvar} disabled={busy} className="ia-btn" style={{ flex: 1.4, padding: 12 }}>{busy ? 'Salvando…' : 'Salvar'}</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** Super admin edita os dados cadastrais da empresa (mesma validação do cliente). */

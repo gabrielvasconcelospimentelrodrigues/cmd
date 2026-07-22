@@ -24,7 +24,7 @@ export function asaasAtivo(): boolean {
   return !!env.ASAAS_API_KEY;
 }
 
-async function chamar<T>(caminho: string, metodo: 'GET' | 'POST' | 'DELETE', corpo?: unknown): Promise<T> {
+async function chamar<T>(caminho: string, metodo: 'GET' | 'POST' | 'PUT' | 'DELETE', corpo?: unknown): Promise<T> {
   const resp = await fetch(`${env.ASAAS_BASE_URL}${caminho}`, {
     method: metodo,
     headers: {
@@ -191,6 +191,22 @@ export async function buscarCobranca(paymentId: string): Promise<any | null> {
   try {
     return await chamar(`/payments/${paymentId}`, 'GET');
   } catch { return null; }
+}
+
+/** Atualiza valor/vencimento de uma cobrança (o super admin corrigiu a fatura). */
+export async function atualizarCobrancaAsaas(paymentId: string, campos: { value?: number; dueDate?: string }): Promise<void> {
+  if (!asaasAtivo()) return;
+  const corpo: Record<string, unknown> = {};
+  if (campos.value !== undefined) corpo.value = campos.value;
+  if (campos.dueDate !== undefined) corpo.dueDate = campos.dueDate;
+  if (Object.keys(corpo).length === 0) return;
+  await chamar(`/payments/${paymentId}`, 'PUT', corpo);
+}
+
+/** Cancela (exclui) uma cobrança — a fatura foi excluída/corrigida no nosso lado. */
+export async function cancelarCobrancaAsaas(paymentId: string): Promise<void> {
+  if (!asaasAtivo()) return;
+  await chamar(`/payments/${paymentId}`, 'DELETE');
 }
 
 /** Só dígitos; CPF tem 11 e CNPJ 14 — o Asaas recusa qualquer outra coisa. */

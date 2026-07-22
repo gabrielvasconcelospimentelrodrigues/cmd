@@ -6,7 +6,7 @@ import { montarPlano } from './empresas';
 import { registrarLog, ator, atorNome } from '../lib/audit';
 import { getPrecos, precoTerminalNaPosicao, type Precos } from '../lib/precos';
 import { getMotorConfig, type MotorConfig } from '../lib/motor-config';
-import { criarCobrancaAsaas } from '../lib/asaas';
+import { criarCobrancaAsaas, atualizarCobrancaAsaas, cancelarCobrancaAsaas } from '../lib/asaas';
 import { liberarTerminal } from '../lib/terminais';
 import { isencaoVigente } from '../lib/acesso';
 import { validaCpfCnpj, soDigitos } from '../lib/documento';
@@ -618,6 +618,64 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return data;
   });
 
+  /** Editar fatura (corrigir valor, vencimento, descrição) — o super admin
+   * errou ao lançar. Se mexer no vencimento, o Asaas também é atualizado. */
+  app.patch('/admin/faturas/:id', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+    const { data: f } = await (supabaseAdmin as any).from('faturas').select('*').eq('id', id).maybeSingle();
+    if (!f) return reply.code(404).send({ error: 'fatura não encontrada.' });
+
+    const b = (req.body ?? {}) as { valor?: number; vencimento?: string; descricao?: string };
+    const patch: Record<string, unknown> = {};
+    if (b.valor !== undefined) {
+      const v = Number(b.valor);
+      if (!(v > 0)) return reply.code(400).send({ error: 'Valor deve ser maior que zero.' });
+      patch.valor = v;
+    }
+    if (b.vencimento !== undefined) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.vencimento))) return reply.code(400).send({ error: 'Data de vencimento inválida.' });
+      patch.vencimento = b.vencimento;
+    }
+    if (b.descricao !== undefined) patch.descricao = String(b.descricao).trim();
+    if (Object.keys(patch).length === 0) return reply.code(400).send({ error: 'nada para atualizar.' });
+
+    const { data, error } = await (supabaseAdmin as any).from('faturas').update(patch).eq('id', id).select('*').single();
+    if (error) return reply.code(400).send({ error: error.message });
+
+    // Reflete no Asaas (valor/vencimento) se a cobrança existe e não foi paga.
+    if (f.asaas_payment_id && f.status !== 'pago' && (patch.valor || patch.vencimento)) {
+      await atualizarCobrancaAsaas(f.asaas_payment_id, {
+        value: patch.valor ? Number(patch.valor) : undefined,
+        dueDate: patch.vencimento ? String(patch.vencimento) : undefined,
+      }).catch(() => {});
+    }
+    await registrarLog({
+      tenantId: f.tenant_id, categoria: 'financeiro', acao: 'fatura.editada', nivel: 'alerta', ator: ator(req),
+      descricao: `${atorNome(req)} editou a fatura "${data.descricao || data.tipo}" (${brl(data.valor)}, vence ${data.vencimento}).`,
+      meta: { fatura_id: id },
+    });
+    return data;
+  });
+
+  /** Excluir fatura lançada por engano. Cancela a cobrança no Asaas antes,
+   * senão o cliente seguiria recebendo cobrança de algo que não existe mais. */
+  app.delete('/admin/faturas/:id', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+    const { data: f } = await (supabaseAdmin as any).from('faturas').select('*').eq('id', id).maybeSingle();
+    if (!f) return reply.code(404).send({ error: 'fatura não encontrada.' });
+
+    if (f.asaas_payment_id) await cancelarCobrancaAsaas(f.asaas_payment_id).catch(() => {});
+    await (supabaseAdmin as any).from('faturas').delete().eq('id', id);
+    await registrarLog({
+      tenantId: f.tenant_id, categoria: 'financeiro', acao: 'fatura.excluida', nivel: 'alerta', ator: ator(req),
+      descricao: `${atorNome(req)} excluiu a fatura "${f.descricao || f.tipo}" (${brl(f.valor)}).`,
+      meta: { fatura_id: id, valor: f.valor },
+    });
+    return { ok: true };
+  });
+
   // Gera a mensalidade cheia do mês corrente (idempotente por tenant+mês).
   app.post('/admin/tenants/:id/gerar-mensalidade', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
@@ -686,6 +744,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const hojeStr = new Date().toISOString().slice(0, 10);
     // A vencer precisa de data futura; pago usa a data do pagamento (ou hoje).
     if (!pago && !b.vencimento) return reply.code(400).send({ error: 'Parcela a vencer precisa de uma data de vencimento.' });
+    // Uma parcela "a vencer" com data no passado já nasceria vencida e
+    // bloquearia o cliente na hora — quase sempre é erro de digitação.
+    if (!pago && b.vencimento && String(b.vencimento) < hojeStr) {
+      return reply.code(400).send({ error: 'A data da parcela a vencer não pode estar no passado.' });
+    }
     const vencimento = pago ? (b.pago_em ?? hojeStr) : String(b.vencimento);
     const referencia = b.referencia ?? new Date().toISOString().slice(0, 7);
     const rotuloTipo = tipo === 'mensalidade' ? 'Mensalidade' : tipo === 'implantacao' ? 'Implantação' : 'Lançamento';
