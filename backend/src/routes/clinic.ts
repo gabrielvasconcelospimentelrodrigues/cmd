@@ -37,7 +37,10 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
     // acesso_automacao: o login é livre, mas a automação depende do pagamento —
     // o painel usa isto para exibir o aviso de fim do período de teste.
     const acesso = req.tenant ? await verificarAcessoAutomacao(req.tenant) : null;
-    return { user: req.authUser, tenant: req.tenant, member: req.member, acesso_automacao: acesso };
+    // Não expõe identificadores internos do Asaas na resposta (o cliente não
+    // precisa deles; ficam só no backend para casar cobrança).
+    const { asaas_customer_id, asaas_subscription_id, ...tenantPublico } = (req.tenant ?? {}) as Record<string, unknown>;
+    return { user: req.authUser, tenant: req.tenant ? tenantPublico : null, member: req.member, acesso_automacao: acesso };
   });
 
   // Contas CMD-COLETA da clínica (sem expor senha/MFA cifrados).

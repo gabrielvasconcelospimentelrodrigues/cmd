@@ -11,6 +11,29 @@ import type { Database, UploadOrigem } from '../types/database';
 const BUCKET = 'uploads';
 const ORIGENS_VALIDAS: UploadOrigem[] = ['ficha_completa', 'extrator', 'dados_importados'];
 
+/**
+ * Verifica se o usuário pode AGIR sobre um envio (mutação). Além do tenant,
+ * aplica o escopo do MEMBRO de equipe: um membro só mexe nos envios que ele
+ * subiu OU que estão num terminal designado a ele — igual ao filtro da
+ * listagem (GET /uploads). Sem isso, um membro alterava/apagava envios de
+ * outros membros do mesmo assinante. Devolve o upload se ok, senão null.
+ */
+async function acessoAoUpload(
+  req: FastifyRequest, uploadId: number, campos = '',
+): Promise<any | null> {
+  const sel = `id, uploaded_by, ${campos ? campos + ', ' : ''}clinic_accounts(tenant_id, member_user_id), empresas(tenant_id)`;
+  const { data: up } = await (supabaseAdmin as any)
+    .from('uploads').select(sel).eq('id', uploadId).maybeSingle();
+  if (!up) return null;
+  const tenantDoUpload = up.clinic_accounts?.tenant_id ?? up.empresas?.tenant_id ?? null;
+  if (tenantDoUpload !== req.tenant!.id) return null;
+  if (req.member) {
+    const meu = up.uploaded_by === req.member.user_id || up.clinic_accounts?.member_user_id === req.member.user_id;
+    if (!meu) return null;
+  }
+  return up;
+}
+
 const MSG_DUPLICADO = 'Cadastro duplicado — mesmo CNS já cadastrado nesta data de atendimento.';
 
 /**
@@ -423,16 +446,8 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
 
     if (!pr) return reply.code(404).send({ error: 'paciente não encontrado.' });
 
-    // Validate ownership of upload
-    const { data: up } = await (supabaseAdmin as any)
-      .from('uploads')
-      .select('id, clinic_accounts(tenant_id), empresas(tenant_id)')
-      .eq('id', (pr as any).upload_id)
-      .maybeSingle();
-
-    if (!up) return reply.code(404).send({ error: 'paciente não encontrado.' });
-    const isOwner = (up as any).clinic_accounts?.tenant_id === req.tenant!.id || (up as any).empresas?.tenant_id === req.tenant!.id;
-    if (!isOwner) return reply.code(404).send({ error: 'paciente não encontrado.' });
+    // Dono do envio (tenant + escopo do membro).
+    if (!(await acessoAoUpload(req, (pr as any).upload_id))) return reply.code(404).send({ error: 'paciente não encontrado.' });
 
     if (!(pr as any).clinic_account_id) {
       return reply.code(400).send({ error: 'Selecione um terminal de automação para este envio antes de tentar reenviar.' });
@@ -461,15 +476,7 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
 
     if (!pr) return reply.code(404).send({ error: 'paciente não encontrado.' });
 
-    const { data: up } = await (supabaseAdmin as any)
-      .from('uploads')
-      .select('id, clinic_accounts(tenant_id), empresas(tenant_id)')
-      .eq('id', (pr as any).upload_id)
-      .maybeSingle();
-
-    if (!up) return reply.code(404).send({ error: 'paciente não encontrado.' });
-    const isOwner = (up as any).clinic_accounts?.tenant_id === req.tenant!.id || (up as any).empresas?.tenant_id === req.tenant!.id;
-    if (!isOwner) return reply.code(404).send({ error: 'paciente não encontrado.' });
+    if (!(await acessoAoUpload(req, (pr as any).upload_id))) return reply.code(404).send({ error: 'paciente não encontrado.' });
 
     await supabaseAdmin.from('patient_records').update({ status: 'done_manually' }).eq('id', id);
     return { ok: true };
@@ -492,9 +499,7 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
     const { data: pr } = await (supabaseAdmin as any).from('patient_records').select('id, upload_id').eq('id', id).maybeSingle();
     if (!pr) return reply.code(404).send({ error: 'ficha não encontrada.' });
-    const { data: up } = await (supabaseAdmin as any).from('uploads').select('id, clinic_accounts(tenant_id), empresas(tenant_id)').eq('id', pr.upload_id).maybeSingle();
-    const isOwner = up && ((up as any).clinic_accounts?.tenant_id === req.tenant!.id || (up as any).empresas?.tenant_id === req.tenant!.id);
-    if (!isOwner) return reply.code(404).send({ error: 'ficha não encontrada.' });
+    if (!(await acessoAoUpload(req, pr.upload_id))) return reply.code(404).send({ error: 'ficha não encontrada.' });
     const patch = camposFicha((req.body ?? {}) as Record<string, unknown>);
     if (Object.keys(patch).length === 0) return reply.code(400).send({ error: 'nada para atualizar.' });
     const { data, error } = await (supabaseAdmin as any).from('patient_records').update(patch).eq('id', id).select('*').single();
@@ -508,9 +513,7 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/uploads/:id/patients', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
-    const { data: up } = await (supabaseAdmin as any).from('uploads').select('id, clinic_accounts(tenant_id), empresas(tenant_id)').eq('id', id).maybeSingle();
-    const isOwner = up && ((up as any).clinic_accounts?.tenant_id === req.tenant!.id || (up as any).empresas?.tenant_id === req.tenant!.id);
-    if (!isOwner) return reply.code(404).send({ error: 'envio não encontrado.' });
+    if (!(await acessoAoUpload(req, id))) return reply.code(404).send({ error: 'envio não encontrado.' });
     const body = (req.body ?? {}) as Record<string, unknown>;
     const patch = camposFicha(body);
     if (Object.keys(patch).length === 0) return reply.code(400).send({ error: 'informe ao menos um campo para aplicar.' });
@@ -527,15 +530,8 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     const id = Number((req.params as { id: string }).id);
     if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
 
-    const { data: up } = await (supabaseAdmin as any)
-      .from('uploads')
-      .select('id, file_path, clinic_accounts(tenant_id), empresas(tenant_id)')
-      .eq('id', id)
-      .maybeSingle();
-
+    const up = await acessoAoUpload(req, id, 'file_path');
     if (!up) return reply.code(404).send({ error: 'envio não encontrado.' });
-    const isOwner = (up as any).clinic_accounts?.tenant_id === req.tenant!.id || (up as any).empresas?.tenant_id === req.tenant!.id;
-    if (!isOwner) return reply.code(404).send({ error: 'envio não encontrado.' });
 
     // 1) Marca parado + deleted_at + FLAG de stop no Redis PRIMEIRO — se a
     //    automação estiver rodando, ela aborta na próxima checagem (a flag não é
@@ -596,6 +592,8 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
       if (emp) ownerOk = true;
     }
     if (!ownerOk) return reply.code(403).send({ error: 'Acesso negado.' });
+    // Escopo do membro: só age nos próprios envios (não nos de outro membro).
+    if (req.member && !(await acessoAoUpload(req, id))) return reply.code(403).send({ error: 'Acesso negado.' });
 
     const nomeLista = (up as any).name || `lista #${id}`;
     if (acao === 'pausar') {
