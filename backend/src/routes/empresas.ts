@@ -310,6 +310,7 @@ export async function empresaRoutes(app: FastifyInstance): Promise<void> {
 
   // Cadastrar nova empresa (a taxa é definida depois pelo super admin).
   app.post('/empresas', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
+    if (req.member) return reply.code(403).send({ error: 'Apenas o titular da conta pode cadastrar empresas.' });
     const body = (req.body ?? {}) as { nome?: string; cnpj?: string };
     if (!body.nome || !body.nome.trim()) return reply.code(400).send({ error: 'nome da empresa é obrigatório.' });
     // CNPJ é opcional na criação (o cliente pode completar depois pelo alerta),
@@ -342,6 +343,7 @@ export async function empresaRoutes(app: FastifyInstance): Promise<void> {
    * casa pagamento por esse id; manter o antigo cobraria com o dado errado).
    */
   app.patch('/empresas/:id', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
+    if (req.member) return reply.code(403).send({ error: 'Apenas o titular da conta pode editar os dados da empresa.' });
     const id = Number((req.params as { id: string }).id);
     if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
     const { data: emp } = await (supabaseAdmin as any)
@@ -382,6 +384,7 @@ export async function empresaRoutes(app: FastifyInstance): Promise<void> {
   // Descontratar (cancelar) 1 terminal — cobrança segue até o fim do período
   // atual e, a partir daí, o terminal sai da conta (não gera mais cobrança).
   app.post('/empresas/:id/descontratar-terminal', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
+    if (req.member) return reply.code(403).send({ error: 'Apenas o titular da conta pode alterar terminais.' });
     const id = Number((req.params as { id: string }).id);
     if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
     const { data: emp } = await (supabaseAdmin as any)
@@ -405,6 +408,7 @@ export async function empresaRoutes(app: FastifyInstance): Promise<void> {
 
   // Desfazer um cancelamento agendado (enquanto ainda não venceu).
   app.post('/empresas/:id/desfazer-cancelamento', { preHandler: [app.authenticate, app.requireActive] }, async (req, reply) => {
+    if (req.member) return reply.code(403).send({ error: 'Apenas o titular da conta pode alterar terminais.' });
     const id = Number((req.params as { id: string }).id);
     if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
     const { data: emp } = await (supabaseAdmin as any)

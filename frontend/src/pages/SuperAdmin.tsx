@@ -607,7 +607,7 @@ interface Dossie {
   plano: { mensal: number; total_terminais: number; nao_alocados: number; valor_terminal: number; valor_implantacao: number; implantacao_paga: boolean; empresas: { id: number; nome: string; terminais: number; mensal: number }[] } | null;
   resumo: { envios_total: number; envios_concluidos: number; cadastrados: number; erros: number; encontrados: number; taxa_pct: number; tempo_ativo_segundos: number; terminais_conectados: number; em_aberto: number; vencido: number; inadimplente: boolean; proxima_vencimento: { descricao: string; valor: number; vencimento: string; vencida: boolean } | null };
   faturas: { id: number; tipo: string; descricao: string | null; referencia: string; valor: number; vencimento: string; status: string; empresa_nome: string | null; vencida: boolean }[];
-  terminais: { id: number; label: string | null; cmd_username: string | null; cmd_password?: string | null; mfa_secret?: string | null; is_enabled: boolean; empresa_nome: string | null; membro_nome: string | null; last_run_at: string | null; last_run_status: string | null; cid_padrao: string | null; cid_oci_0_8?: string | null; cid_9_mais?: string | null }[];
+  terminais: { id: number; label: string | null; cmd_username: string | null; tem_senha?: boolean; tem_mfa?: boolean; is_enabled: boolean; empresa_nome: string | null; membro_nome: string | null; last_run_at: string | null; last_run_status: string | null; cid_padrao: string | null; cid_oci_0_8?: string | null; cid_9_mais?: string | null }[];
   envios: { id: number; nome: string; status: string; empresa_nome: string | null; uploaded_at: string; encontrados: number; cadastrados: number; erros: number; concluido_em: string | null; retry_rounds: number; tempo_ativo_segundos: number }[];
   membros: { id: number; user_id: string; nome: string | null; email: string; role: string; empresa_id: number | null; cmd_conectado?: boolean }[];
   atividades: { id: number; categoria: string; acao: string; descricao: string; nivel: string; actor_nome: string | null; criado_em: string }[];
@@ -774,8 +774,18 @@ function InfoLinha({ k, v, cor }: { k: string; v: string; cor?: string }) {
 function DossieOnboarding({ d, showToast }: { d: Dossie; showToast: (t: ToastData) => void }) {
   const t = d.tenant;
   const t0 = d.terminais[0] || null; // O terminal inicial cadastrado no onboarding
-  const [verSenha, setVerSenha] = useState(false);
-  const [verMfa, setVerMfa] = useState(false);
+  // A senha/MFA NÃO vêm no dossiê — são buscadas sob demanda (cada revelação é
+  // auditada no backend). Guardamos o valor revelado só em memória.
+  const [senha, setSenha] = useState<string | null>(null);
+  const [mfa, setMfa] = useState<string | null>(null);
+
+  const revelar = async (campo: 'senha' | 'mfa') => {
+    if (!t0) return;
+    try {
+      const r = await apiGet<{ valor: string | null }>(`/admin/clinic-accounts/${t0.id}/credencial?campo=${campo}`);
+      if (campo === 'senha') setSenha(r.valor ?? '—'); else setMfa(r.valor ?? '—');
+    } catch (e) { showToast({ title: 'Falha', msg: (e as Error).message, kind: 'err' }); }
+  };
 
   const copiar = (texto: string, desc: string) => {
     navigator.clipboard.writeText(texto);
@@ -810,17 +820,19 @@ function DossieOnboarding({ d, showToast }: { d: Dossie; showToast: (t: ToastDat
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 0', borderBottom: '1px solid var(--c-border)', alignItems: 'center' }}>
                 <span style={{ color: 'var(--c-ink3)', fontSize: 13 }}>Senha CMD-COLETA</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ color: 'var(--c-ink)', fontSize: 13, fontWeight: 600, fontFamily: verSenha ? 'monospace' : 'inherit' }}>
-                    {verSenha ? (t0.cmd_password || '—') : '••••••••'}
+                  <span style={{ color: 'var(--c-ink)', fontSize: 13, fontWeight: 600, fontFamily: senha ? 'monospace' : 'inherit' }}>
+                    {senha ?? '••••••••'}
                   </span>
-                  {t0.cmd_password && (
+                  {t0.tem_senha && (
                     <>
-                      <button onClick={() => setVerSenha(!verSenha)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--c-ink3)', display: 'grid', placeItems: 'center', padding: 2 }}>
-                        {verSenha ? <EyeOff size={14} /> : <Eye size={14} />}
+                      <button onClick={() => (senha ? setSenha(null) : revelar('senha'))} title={senha ? 'Ocultar' : 'Revelar (fica registrado)'} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--c-ink3)', display: 'grid', placeItems: 'center', padding: 2 }}>
+                        {senha ? <EyeOff size={14} /> : <Eye size={14} />}
                       </button>
-                      <button onClick={() => copiar(t0.cmd_password || '', 'Senha')} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--c-ink3)', display: 'grid', placeItems: 'center', padding: 2 }}>
-                        <Copy size={14} />
-                      </button>
+                      {senha && (
+                        <button onClick={() => copiar(senha, 'Senha')} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--c-ink3)', display: 'grid', placeItems: 'center', padding: 2 }}>
+                          <Copy size={14} />
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -831,16 +843,18 @@ function DossieOnboarding({ d, showToast }: { d: Dossie; showToast: (t: ToastDat
                 <span style={{ color: 'var(--c-ink3)', fontSize: 13 }}>Chave 2FA (MFA Secret)</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span className="ia-mono" style={{ color: 'var(--c-ink)', fontSize: 12, fontWeight: 600 }}>
-                    {verMfa ? (t0.mfa_secret || '—') : '••••••••'}
+                    {mfa ?? '••••••••'}
                   </span>
-                  {t0.mfa_secret && (
+                  {t0.tem_mfa && (
                     <>
-                      <button onClick={() => setVerMfa(!verMfa)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--c-ink3)', display: 'grid', placeItems: 'center', padding: 2 }}>
-                        {verMfa ? <EyeOff size={14} /> : <Eye size={14} />}
+                      <button onClick={() => (mfa ? setMfa(null) : revelar('mfa'))} title={mfa ? 'Ocultar' : 'Revelar (fica registrado)'} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--c-ink3)', display: 'grid', placeItems: 'center', padding: 2 }}>
+                        {mfa ? <EyeOff size={14} /> : <Eye size={14} />}
                       </button>
-                      <button onClick={() => copiar(t0.mfa_secret || '', 'Chave 2FA')} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--c-ink3)', display: 'grid', placeItems: 'center', padding: 2 }}>
-                        <Copy size={14} />
-                      </button>
+                      {mfa && (
+                        <button onClick={() => copiar(mfa, 'Chave 2FA')} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--c-ink3)', display: 'grid', placeItems: 'center', padding: 2 }}>
+                          <Copy size={14} />
+                        </button>
+                      )}
                     </>
                   )}
                 </div>

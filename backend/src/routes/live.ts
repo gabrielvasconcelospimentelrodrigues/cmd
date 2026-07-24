@@ -10,21 +10,42 @@ import { env } from '../config/env';
  * `live:{uploadId}` enquanto opera o gov.br. Aqui assinamos esse canal e
  * repassamos cada frame ao navegador do assinante como evento SSE.
  *
- * Rota PÚBLICA por `public_token` (não vaza dados — é só o vídeo do robô e o
- * token é um uuid imprevisível), para a tela "Ver Robô Ao Vivo" abrir sem
- * cabeçalho de auth (o EventSource do browser não envia Authorization).
+ * A tela mostra dados de paciente sendo digitados (nome/CNS), então NÃO é
+ * pública: além do `public_token` (seletor da transmissão), exige o token de
+ * sessão do usuário via query `?auth=` (o EventSource do browser não envia
+ * Authorization) e confere que o upload é do MESMO assinante.
  */
 export async function liveRoutes(app: FastifyInstance): Promise<void> {
   app.get('/live/:token', async (req, reply) => {
     const token = (req.params as { token: string }).token;
 
-    const { data: up } = await supabaseAdmin
+    // 1) Autentica o usuário pelo access token do Supabase (na query).
+    const jwt = String((req.query as { auth?: string }).auth ?? '');
+    if (!jwt) return reply.code(401).send({ error: 'não autorizado.' });
+    const { data: userData } = await supabaseAdmin.auth.getUser(jwt);
+    const uid = userData?.user?.id;
+    if (!uid) return reply.code(401).send({ error: 'sessão inválida.' });
+
+    // 2) Resolve o tenant do usuário (titular OU membro de equipe).
+    let tenantId: number | null = null;
+    const { data: dono } = await (supabaseAdmin as any).from('tenants').select('id').eq('owner_user_id', uid).maybeSingle();
+    if (dono) tenantId = dono.id;
+    else {
+      const { data: membro } = await (supabaseAdmin as any).from('tenant_members').select('tenant_id').eq('user_id', uid).maybeSingle();
+      tenantId = membro?.tenant_id ?? null;
+    }
+    if (!tenantId) return reply.code(403).send({ error: 'acesso negado.' });
+
+    // 3) O upload precisa ser do tenant do usuário (senão é PII de outro cliente).
+    const { data: up } = await (supabaseAdmin as any)
       .from('uploads')
-      .select('id')
+      .select('id, clinic_accounts(tenant_id), empresas(tenant_id)')
       .eq('public_token', token)
       .is('deleted_at', null)
       .maybeSingle();
     if (!up) return reply.code(404).send({ error: 'transmissão não encontrada.' });
+    const donoUpload = up.clinic_accounts?.tenant_id ?? up.empresas?.tenant_id ?? null;
+    if (donoUpload !== tenantId) return reply.code(403).send({ error: 'acesso negado.' });
 
     // hijack(): assumimos o controle total da resposta (SSE via reply.raw). Sem
     // isso, quando o handler async retorna, o Fastify tenta enviar a resposta e,

@@ -10,6 +10,7 @@ import { criarCobrancaAsaas, atualizarCobrancaAsaas, cancelarCobrancaAsaas } fro
 import { liberarTerminal } from '../lib/terminais';
 import { isencaoVigente } from '../lib/acesso';
 import { validaCpfCnpj, soDigitos } from '../lib/documento';
+import { decrypt } from '../lib/crypto';
 import type { Database } from '../types/database';
 
 const brl = (v: number | string) =>
@@ -378,8 +379,6 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
     const hoje = new Date().toISOString().slice(0, 10);
 
-    const { decrypt } = await import('../lib/crypto');
-
     const [{ data: tenant }, plano] = await Promise.all([
       supabaseAdmin.from('tenants').select('*').eq('id', id).maybeSingle(),
       montarPlano(id),
@@ -431,24 +430,17 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       },
       faturas: fats.map((f) => ({ ...f, valor: Number(f.valor), empresa_nome: f.empresas?.nome ?? null, vencida: f.status === 'aberto' && f.vencimento < hoje })),
       terminais: (terminais ?? []).map((t: any) => {
-        let passwordDecrypted = null;
-        let mfaDecrypted = null;
-        try {
-          if (t.cmd_password_encrypted) passwordDecrypted = decrypt(t.cmd_password_encrypted);
-        } catch (e) {
-          req.log.error(e);
-        }
-        try {
-          if (t.mfa_secret_encrypted) mfaDecrypted = decrypt(t.mfa_secret_encrypted);
-        } catch (e) {
-          req.log.error(e);
-        }
+        // NÃO devolve senha/MFA em claro no dossiê (o payload trafega e fica no
+        // navegador). Só informa que EXISTEM; a revelação é sob demanda e
+        // auditada em GET /admin/clinic-accounts/:id/credencial. Também não
+        // vazamos as cifras.
+        const { cmd_password_encrypted, mfa_secret_encrypted, ...limpo } = t;
         return {
-          ...t,
-          cmd_password: passwordDecrypted,
-          mfa_secret: mfaDecrypted,
+          ...limpo,
+          tem_senha: !!cmd_password_encrypted,
+          tem_mfa: !!mfa_secret_encrypted,
           empresa_nome: empNomes.get(t.empresa_id) ?? null,
-          membro_nome: memberNomes.get(t.member_user_id) ?? null
+          membro_nome: memberNomes.get(t.member_user_id) ?? null,
         };
       }),
       envios: envList.map((u) => ({
@@ -471,14 +463,54 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
+  /**
+   * Revela a credencial (senha CMD ou segredo MFA) de UMA conta, sob demanda.
+   * O super admin opera as contas dos clientes, então precisa vê-las — mas cada
+   * revelação é AUDITADA (fica registrado quem viu qual credencial e quando) e
+   * não trafega no dossiê em massa. `campo` = 'senha' | 'mfa'.
+   */
+  app.get('/admin/clinic-accounts/:id/credencial', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+    const campo = String((req.query as { campo?: string }).campo ?? '');
+    if (campo !== 'senha' && campo !== 'mfa') return reply.code(400).send({ error: 'campo inválido (use senha ou mfa).' });
+
+    const { data: ca } = await (supabaseAdmin as any)
+      .from('clinic_accounts')
+      .select('id, tenant_id, label, cmd_username, cmd_password_encrypted, mfa_secret_encrypted')
+      .eq('id', id).maybeSingle();
+    if (!ca) return reply.code(404).send({ error: 'conta não encontrada.' });
+
+    let valor: string | null = null;
+    try {
+      const cifra = campo === 'senha' ? ca.cmd_password_encrypted : ca.mfa_secret_encrypted;
+      if (cifra) valor = decrypt(cifra);
+    } catch (e) { req.log.error(e); return reply.code(500).send({ error: 'falha ao decifrar.' }); }
+
+    await registrarLog({
+      tenantId: ca.tenant_id, categoria: 'seguranca', acao: 'credencial.revelada', nivel: 'alerta', ator: ator(req),
+      descricao: `${atorNome(req)} revelou ${campo === 'senha' ? 'a senha' : 'o segredo 2FA'} da conta "${ca.label || ca.cmd_username}".`,
+      meta: { clinic_account_id: id, campo },
+    });
+    return { valor };
+  });
+
   // Atualiza valores do plano do assinante (mensalidade/terminal, implantação).
   app.patch('/admin/tenants/:id/plano', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
     const body = (req.body ?? {}) as { valor_terminal?: number; valor_implantacao?: number; implantacao_paga?: boolean; isento_pagamento?: boolean; isento_dias?: number };
     const patch: Record<string, unknown> = {};
-    if (body.valor_terminal !== undefined) patch.valor_terminal = Number(body.valor_terminal);
-    if (body.valor_implantacao !== undefined) patch.valor_implantacao = Number(body.valor_implantacao);
+    // Valores >= 0 e finitos — evita NaN/negativo entrar na contabilidade.
+    const valorOk = (v: unknown) => Number.isFinite(Number(v)) && Number(v) >= 0;
+    if (body.valor_terminal !== undefined) {
+      if (!valorOk(body.valor_terminal)) return reply.code(400).send({ error: 'valor_terminal inválido.' });
+      patch.valor_terminal = Number(body.valor_terminal);
+    }
+    if (body.valor_implantacao !== undefined) {
+      if (!valorOk(body.valor_implantacao)) return reply.code(400).send({ error: 'valor_implantacao inválido.' });
+      patch.valor_implantacao = Number(body.valor_implantacao);
+    }
     if (typeof body.implantacao_paga === 'boolean') patch.implantacao_paga = body.implantacao_paga;
     // ISENÇÃO: parceiro / conta de teste / cortesia — roda automação sem pagar.
     // Fica no mesmo endpoint do plano porque é uma decisão comercial, e é
@@ -822,7 +854,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/admin/lancamentos', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
     const b = (req.body ?? {}) as { tipo?: string; categoria?: string; descricao?: string; valor?: number; competencia?: string; recorrente?: boolean };
-    if (!b.descricao || !b.valor || !b.competencia) return reply.code(400).send({ error: 'descricao, valor e competencia são obrigatórios.' });
+    if (!b.descricao || !b.competencia) return reply.code(400).send({ error: 'descricao e competencia são obrigatórios.' });
+    if (!Number.isFinite(Number(b.valor)) || Number(b.valor) <= 0) return reply.code(400).send({ error: 'valor inválido (deve ser maior que zero).' });
     const { data, error } = await (supabaseAdmin as any).from('lancamentos').insert({
       tipo: b.tipo === 'receita' ? 'receita' : 'custo',
       categoria: b.categoria || 'outro',

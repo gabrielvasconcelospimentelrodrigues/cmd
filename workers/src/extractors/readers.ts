@@ -67,6 +67,9 @@ export function lerXml(buffer: Buffer): { colunas: string[]; linhas: Record<stri
     preserveOrder: true,
     ignoreAttributes: true,
     trimValues: true,
+    // Não expandir entidades declaradas no DOCTYPE — evita "billion laughs"
+    // (DoS por expansão exponencial). O extractor só lê tags/texto.
+    processEntities: false,
   });
   const arvore = parser.parse(buffer.toString('utf8')) as PreservedNode[];
 

@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
+import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env';
 import authPlugin from './plugins/auth';
 import { healthRoutes } from './routes/health';
@@ -33,6 +34,8 @@ async function buildServer() {
         paths: [
           'req.body.cartao', 'req.body.cartao.number', 'req.body.cartao.ccv',
           'req.body.titular', 'body.cartao', 'body.titular',
+          // Credenciais CMD que o cliente envia ao conectar/editar conta.
+          'req.body.cmd_password', 'req.body.mfa_secret', 'body.cmd_password', 'body.mfa_secret',
           'req.headers.authorization', 'req.headers["asaas-access-token"]',
         ],
         censor: '[REDACTED]',
@@ -53,7 +56,21 @@ async function buildServer() {
     credentials: true,
   });
   await app.register(multipart, {
-    limits: { fileSize: 50 * 1024 * 1024, files: 1 }, // 50MB, 1 arquivo
+    // 15MB é folgado para planilha de pacientes (dezenas de milhares de linhas
+    // num .xlsx cabem em poucos MB). Limite alto abria espaço para zip-bomb:
+    // um .xlsx (ZIP) de 50MB descomprime para vários GB e derruba o processo.
+    limits: { fileSize: 15 * 1024 * 1024, files: 1 },
+  });
+
+  // RATE LIMIT — backstop contra abuso/DoS. Teto alto para não atrapalhar o uso
+  // normal (o painel faz polling a cada 6s em várias abas). O webhook do Asaas
+  // e o health ficam de fora (o Asaas reenvia eventos e não pode ser barrado).
+  await app.register(rateLimit, {
+    max: 1200,
+    timeWindow: '1 minute',
+    allowList: (req) => req.url.startsWith('/webhooks/') || req.url.startsWith('/health'),
+    // Atrás do nginx, usa o IP real (trustProxy já está ligado).
+    keyGenerator: (req) => req.ip,
   });
 
   await app.register(authPlugin);

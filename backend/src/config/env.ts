@@ -18,8 +18,10 @@ const schema = z.object({
 
   REDIS_URL: z.string().default('redis://localhost:6379'),
 
-  // Opcional aqui — obrigatória só nos workers que cifram credenciais.
-  FIELD_ENCRYPTION_KEY: z.string().optional(),
+  // Cifra as credenciais CMD (o backend também cifra ao conectar contas).
+  // Se presente, exige tamanho de chave Fernet válido — uma chave curta/fraca
+  // não deve passar no boot. Opcional só porque nem todo ambiente cifra.
+  FIELD_ENCRYPTION_KEY: z.string().min(40, 'FIELD_ENCRYPTION_KEY muito curta (esperado >= 40).').optional(),
 
   CORS_ORIGINS: z
     .string()

@@ -247,8 +247,11 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(204).send();
   });
 
-  // Atualiza os dados da própria clínica (como custo de funcionário).
+  // Atualiza os dados da própria clínica (custo de funcionário, dados de
+  // faturamento). SÓ O TITULAR: mexe em CNPJ/cobrança e parâmetros do plano —
+  // um membro de equipe não pode alterar o faturamento do assinante.
   app.patch('/clinic', { preHandler: app.authenticate }, async (req, reply) => {
+    if (req.member) return reply.code(403).send({ error: 'Apenas o titular da conta pode alterar estes dados.' });
     const body = (req.body ?? {}) as Record<string, unknown>;
     const patch: Record<string, unknown> = {};
 
@@ -334,6 +337,8 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post('/terminal-requests', { preHandler: app.authenticate }, async (req, reply) => {
+    // Contratar terminal gera cobrança — decisão financeira do titular.
+    if (req.member) return reply.code(403).send({ error: 'Apenas o titular da conta pode contratar terminais.' });
     const body = (req.body ?? {}) as { empresa_id?: number };
     let empresaId = body.empresa_id ? Number(body.empresa_id) : null;
 

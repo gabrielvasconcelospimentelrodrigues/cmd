@@ -111,7 +111,7 @@ async function lerColunas(buffer: Buffer, filename: string): Promise<string[]> {
 }
 
 function colunasXml(buffer: Buffer): string[] {
-  const parser = new XMLParser({ preserveOrder: true, ignoreAttributes: true, trimValues: true });
+  const parser = new XMLParser({ preserveOrder: true, ignoreAttributes: true, trimValues: true, processEntities: false });
   const arvore = parser.parse(buffer.toString('utf8')) as Record<string, unknown>[];
   const tagDe = (n: Record<string, unknown>) => Object.keys(n).filter((k) => k !== ':@')[0] ?? null;
   const filhosArr = (n: Record<string, unknown>) => { const t = tagDe(n); return t && Array.isArray(n[t]) ? (n[t] as Record<string, unknown>[]) : []; };

@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { Lock, X, Maximize2, Loader2, Cpu } from 'lucide-react';
 import type { Upload } from '../../lib/types';
+import { supabase } from '../../lib/supabase';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:3333';
 
 /**
  * Visualização AO VIVO real do robô operando o gov.br. Consome o screencast
  * do navegador (frames JPEG) que o worker publica no Redis e o backend
- * transmite via SSE (canal público por upload.public_token).
+ * transmite via SSE. A tela mostra dados de paciente, então a conexão é
+ * autenticada: o access token vai na query (EventSource não manda header) e o
+ * backend confere que o upload é do próprio assinante.
  */
 export function RoboAoVivo({ upload, onClose }: { upload: Upload; onClose?: () => void }) {
   const [frame, setFrame] = useState<string | null>(null);
@@ -15,11 +18,17 @@ export function RoboAoVivo({ upload, onClose }: { upload: Upload; onClose?: () =
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    const es = new EventSource(`${API}/live/${upload.public_token}`);
-    esRef.current = es;
-    es.onmessage = (e) => { setFrame(e.data); setConectando(false); };
-    es.onerror = () => { /* reconecta sozinho */ };
-    return () => es.close();
+    let es: EventSource | null = null;
+    let vivo = true;
+    void supabase.auth.getSession().then(({ data }) => {
+      const jwt = data.session?.access_token;
+      if (!vivo || !jwt) return;
+      es = new EventSource(`${API}/live/${upload.public_token}?auth=${encodeURIComponent(jwt)}`);
+      esRef.current = es;
+      es.onmessage = (e) => { setFrame(e.data); setConectando(false); };
+      es.onerror = () => { /* reconecta sozinho */ };
+    });
+    return () => { vivo = false; es?.close(); };
   }, [upload.public_token]);
 
   return (

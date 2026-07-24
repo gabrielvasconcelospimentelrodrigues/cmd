@@ -16,6 +16,7 @@
     "@fastify/cors": "^10.0.1",
     "@fastify/helmet": "^12.0.1",
     "@fastify/multipart": "^10.0.0",
+    "@fastify/rate-limit": "^11.1.0",
     "@supabase/supabase-js": "^2.45.4",
     "bullmq": "^5.79.2",
     "csv-parse": "^7.0.1",
