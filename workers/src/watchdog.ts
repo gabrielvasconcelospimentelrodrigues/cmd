@@ -3,6 +3,7 @@ import { connection } from './lib/redis';
 import { registrationQueue, verificationQueue } from './queues';
 import { logEntry } from './lib/repo';
 import { getMotorConfig } from './lib/motor-config';
+import { matarNavegadoresOrfaos } from './lib/reaper';
 
 let ultimoRun = 0;
 
@@ -15,6 +16,12 @@ let ultimoRun = 0;
  */
 export async function recuperarUploadsTravados(forcar = false): Promise<void> {
   try {
+    // FAXINEIRO CONTÍNUO (a cada 30s): mata navegadores que perderam o dono
+    // (reparentados ao init). Auto-cura o vazamento de Chromium sem ninguém
+    // precisar entrar na VPS — nunca toca num navegador ativo (esse tem o
+    // worker como pai). Best-effort, não deixa exceção derrubar o watchdog.
+    await matarNavegadoresOrfaos().catch(() => {});
+
     // ANTI-ÓRFÃ (roda SEMPRE, a cada 30s — fora do gate de 5 min): listas presas
     // em 'extracted' "na fila" precisam de um job de espera. O re-enqueue usa
     // jobId FIXO (wait-conta-N): se já existe um job, o BullMQ ignora (não
