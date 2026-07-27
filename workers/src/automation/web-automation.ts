@@ -398,31 +398,16 @@ export class WebAutomator {
       const restanteMin = Math.max(0, Math.ceil((prazo - Date.now()) / 60_000));
       this.passo(`Abrindo CMD-COLETA (tentativa ${tentativa}, até ${restanteMin} min)...`);
 
-      // ⚠️ ANTI-"erro na verificação": cada clique em "Entrar" inicia UM fluxo
-      // OAuth (app → sso → app). Se a tentativa anterior deixou uma aba do app
-      // aberta e nós abrirmos OUTRA, dois fluxos OAuth colidem (state/nonce) e o
-      // gov.br responde "Ops, erro na verificação". Então FECHA a aba do app da
-      // tentativa anterior e recomeça do SCPA — sempre um único fluxo por vez.
-      if (this.page && this.page !== page) {
-        await this.page.close().catch(() => {});
-        this.page = page;
-      }
-
-      // Seleção de perfil SEMPRE no SCPA (page) — NÃO em this.page. Antes rodava
-      // em this.page, que após a 1ª iteração já era a aba do app: o perfil só era
-      // escolhido uma vez (com o SCPA ainda "CARREGANDO") e o ACESSAR seguinte ia
-      // sem contexto de perfil. Aqui garantimos o perfil no portal certo, a cada vez.
-      await this.selecionarPerfilMinisterio(page).catch(() => {});
+      // Reforça a seleção de perfil caso ainda esteja na tela do SCPA.
+      await this.selecionarPerfilMinisterio(this.page!).catch(() => {});
 
       // Portal "Meus Sistemas" → "ACESSAR" abre o CMD-COLETA em nova aba.
       // A conta pode ter VÁRIOS sistemas (ex.: SISCAN + CMD-COLETA). Clica o
       // ACESSAR do CARD do CMD-COLETA — clicar o 1º ACESSAR abriria o sistema
-      // errado (SISCAN) e o login nunca chegava no CMD. Espera o card aparecer
-      // (o SCPA pode estar lento carregando) antes de tentar clicar.
+      // errado (SISCAN) e o login nunca chegava no CMD.
       let acessar = page
         .locator('xpath=//*[contains(text(),"CMD-COLETA")]/ancestor::*[.//*[contains(normalize-space(.),"ACESSAR")]][1]')
         .getByText('ACESSAR', { exact: true }).first();
-      await acessar.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {});
       if (!(await acessar.count().catch(() => 0))) {
         // Só um sistema (CMD-COLETA) → qualquer ACESSAR serve.
         acessar = page.getByText('ACESSAR', { exact: true }).first();
@@ -450,73 +435,21 @@ export class WebAutomator {
       if (await btnEntrar.isVisible({ timeout: 4000 }).catch(() => false)) {
         this.passo('Entrando no CMD-COLETA (clicando em "Entrar")...');
         await btnEntrar.click({ timeout: 8000 }).catch(() => {});
-        // Clicar "Entrar" dispara o OAuth do gov.br (app → sso → app). ESPERA a
-        // cadeia de redirects ASSENTAR em vez de um flat 3s — se o gov.br está
-        // lento, 3s não bastava e voltávamos pra tela "Entrar" achando que falhou.
-        await this.esperarUrlEstavel(this.page!, 40_000);
-
-        // Caiu de volta no FORMULÁRIO do gov.br (#username)? A sessão SSO do app
-        // não pegou → reautentica aqui (CPF/senha/MFA) e deixa redirecionar.
-        if (await this.page!.locator('#username').isVisible({ timeout: 2000 }).catch(() => false)) {
-          this.passo('Sessão pedida de novo — reautenticando no gov.br...');
-          await this.page!.fill('#username', this.opts.username).catch(() => {});
-          await this.page!.fill('#password', this.opts.password).catch(() => {});
-          await this.page!.click('#entrar').catch(() => {});
-          if (await this.page!.locator('#codigo').isVisible({ timeout: 6000 }).catch(() => false)) {
-            await this.page!.fill('#codigo', this.gerarMfa()).catch(() => {});
-            await this.page!.click('#prosseguir').catch(() => {});
-          }
-          await this.esperarUrlEstavel(this.page!, 40_000);
-        }
+        await this.page!.waitForTimeout(3000);
       } else if (this.page!.url().includes('login')) {
         // Fallback: caiu na tela de login do app → vai direto pra home.
         await this.page!.goto('https://cmd-coleta.saude.gov.br/#/home').catch(() => {});
         await this.page!.waitForTimeout(4000);
       }
 
-      // gov.br mostrou "Ops, erro na verificação" (falha no handshake OAuth)?
-      // Não adianta esperar dashboard — recomeça LIMPO: fecha a aba do app, volta
-      // ao SCPA e deixa o laço reabrir um único fluxo novo. Uma pausa evita
-      // martelar o SSO (o que só piora o "erro na verificação").
-      const erroVerif = await this.page!.getByText(/erro na verifica[çc][ãa]o/i)
-        .first().isVisible({ timeout: 1500 }).catch(() => false);
-      if (erroVerif) {
-        this.passo('gov.br retornou "erro na verificação" — recomeçando o acesso limpo...');
-        if (this.page && this.page !== page) {
-          await this.page.close().catch(() => {});
-          this.page = page;
-        }
-        await page.waitForTimeout(6000);
-        continue;
-      }
-
       // Espera o dashboard aparecer (espera generosa; o laço externo dá os 5 min).
       dashboardOk = await this.page!.getByRole('button', { name: 'Incluir contato assistencial' })
         .first().waitFor({ state: 'visible', timeout: 30_000 }).then(() => true).catch(() => false);
 
-      // [DIAG] Captura o que o clique em "Entrar" produziu (sobrescrito a cada
-      // iteração) — revela se voltamos pro "Entrar", caímos no gov.br ou noutra tela.
-      if (!dashboardOk) {
-        await this.page!.screenshot({ path: '/var/www/cmd-saas/apos_entrar.png', fullPage: true }).catch(() => {});
-        await this.page!.waitForTimeout(2000);
-      }
+      if (!dashboardOk) await this.page!.waitForTimeout(2000);
     }
 
     if (!dashboardOk) {
-      // [DIAGNÓSTICO] Registra ONDE empacou: URL + títulos/abas visíveis + quantos
-      // cards "ACESSAR" havia e se o de CMD-COLETA foi encontrado. Salva também um
-      // screenshot em disco (sobrescrito a cada falha) para inspeção real da tela.
-      try {
-        const p2 = this.page!;
-        const url = p2.url();
-        const nCards = await p2.getByText('ACESSAR', { exact: true }).count().catch(() => -1);
-        const temCmdCard = await p2
-          .locator('xpath=//*[contains(text(),"CMD-COLETA")]/ancestor::*[.//*[contains(normalize-space(.),"ACESSAR")]][1]')
-          .count().catch(() => -1);
-        const txt = (await p2.locator('body').innerText({ timeout: 3000 }).catch(() => '')).replace(/\s+/g, ' ').slice(0, 220);
-        this.passo(`[DIAG login] url=${url} | cards ACESSAR=${nCards} | card CMD-COLETA=${temCmdCard} | tela: ${txt}`);
-        await p2.screenshot({ path: '/var/www/cmd-saas/login_falhou.png', fullPage: true }).catch(() => {});
-      } catch { /* best-effort */ }
       // Estourou os 5 min sem chegar na tela de contatos → falha explícita para
       // o retry/relogin de nível superior tratar (em vez de seguir cego).
       throw new Error('Não foi possível chegar à tela "Contatos Assistenciais" em 5 min (regra provisória).');
