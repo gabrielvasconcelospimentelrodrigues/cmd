@@ -450,6 +450,20 @@ export class WebAutomator {
     }
 
     if (!dashboardOk) {
+      // [DIAGNÓSTICO] Registra ONDE empacou: URL + títulos/abas visíveis + quantos
+      // cards "ACESSAR" havia e se o de CMD-COLETA foi encontrado. Salva também um
+      // screenshot em disco (sobrescrito a cada falha) para inspeção real da tela.
+      try {
+        const p2 = this.page!;
+        const url = p2.url();
+        const nCards = await p2.getByText('ACESSAR', { exact: true }).count().catch(() => -1);
+        const temCmdCard = await p2
+          .locator('xpath=//*[contains(text(),"CMD-COLETA")]/ancestor::*[.//*[contains(normalize-space(.),"ACESSAR")]][1]')
+          .count().catch(() => -1);
+        const txt = (await p2.locator('body').innerText({ timeout: 3000 }).catch(() => '')).replace(/\s+/g, ' ').slice(0, 220);
+        this.passo(`[DIAG login] url=${url} | cards ACESSAR=${nCards} | card CMD-COLETA=${temCmdCard} | tela: ${txt}`);
+        await p2.screenshot({ path: '/var/www/cmd-saas/login_falhou.png', fullPage: true }).catch(() => {});
+      } catch { /* best-effort */ }
       // Estourou os 5 min sem chegar na tela de contatos → falha explícita para
       // o retry/relogin de nível superior tratar (em vez de seguir cego).
       throw new Error('Não foi possível chegar à tela "Contatos Assistenciais" em 5 min (regra provisória).');
