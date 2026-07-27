@@ -435,7 +435,24 @@ export class WebAutomator {
       if (await btnEntrar.isVisible({ timeout: 4000 }).catch(() => false)) {
         this.passo('Entrando no CMD-COLETA (clicando em "Entrar")...');
         await btnEntrar.click({ timeout: 8000 }).catch(() => {});
-        await this.page!.waitForTimeout(3000);
+        // Clicar "Entrar" dispara o OAuth do gov.br (app → sso → app). ESPERA a
+        // cadeia de redirects ASSENTAR em vez de um flat 3s — se o gov.br está
+        // lento, 3s não bastava e voltávamos pra tela "Entrar" achando que falhou.
+        await this.esperarUrlEstavel(this.page!, 40_000);
+
+        // Caiu de volta no FORMULÁRIO do gov.br (#username)? A sessão SSO do app
+        // não pegou → reautentica aqui (CPF/senha/MFA) e deixa redirecionar.
+        if (await this.page!.locator('#username').isVisible({ timeout: 2000 }).catch(() => false)) {
+          this.passo('Sessão pedida de novo — reautenticando no gov.br...');
+          await this.page!.fill('#username', this.opts.username).catch(() => {});
+          await this.page!.fill('#password', this.opts.password).catch(() => {});
+          await this.page!.click('#entrar').catch(() => {});
+          if (await this.page!.locator('#codigo').isVisible({ timeout: 6000 }).catch(() => false)) {
+            await this.page!.fill('#codigo', this.gerarMfa()).catch(() => {});
+            await this.page!.click('#prosseguir').catch(() => {});
+          }
+          await this.esperarUrlEstavel(this.page!, 40_000);
+        }
       } else if (this.page!.url().includes('login')) {
         // Fallback: caiu na tela de login do app → vai direto pra home.
         await this.page!.goto('https://cmd-coleta.saude.gov.br/#/home').catch(() => {});
@@ -446,7 +463,12 @@ export class WebAutomator {
       dashboardOk = await this.page!.getByRole('button', { name: 'Incluir contato assistencial' })
         .first().waitFor({ state: 'visible', timeout: 30_000 }).then(() => true).catch(() => false);
 
-      if (!dashboardOk) await this.page!.waitForTimeout(2000);
+      // [DIAG] Captura o que o clique em "Entrar" produziu (sobrescrito a cada
+      // iteração) — revela se voltamos pro "Entrar", caímos no gov.br ou noutra tela.
+      if (!dashboardOk) {
+        await this.page!.screenshot({ path: '/var/www/cmd-saas/apos_entrar.png', fullPage: true }).catch(() => {});
+        await this.page!.waitForTimeout(2000);
+      }
     }
 
     if (!dashboardOk) {
