@@ -311,7 +311,9 @@ export function startRegistrationWorker(): Worker<UploadJob> {
             await logEntry(uploadId, 'WARN', `⚠ Automação travou (${(fatal as Error).message.slice(0, 120)}). Retomando em 30s de onde parou (${registered} cadastrado(s)).`);
             precisaRetomar = true;
           } finally {
-            await automator.close();
+            // close() pode PENDURAR se a página crashou — com teto para não
+            // segurar o worker (e não deixar o navegador preso/vazando).
+            await comTimeout(automator.close(), 30_000, 'close').catch(() => {});
           }
 
           if (abortado) {

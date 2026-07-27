@@ -28,6 +28,9 @@ module.exports = {
       max_restarts: 100,
       restart_delay: 3000,      // espera 3s antes de reiniciar
       max_memory_restart: '1G', // reinicia se estourar memória
+      // Dá tempo ao shutdown de MATAR os navegadores antes do SIGKILL. O padrão
+      // (1,6s) matava o Node na força e orfanava os Chromium (→ vazamento/OOM).
+      kill_timeout: 12000,
       time: true,
     },
   ],
