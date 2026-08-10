@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Building2, Cpu, Plus, CheckCircle2, Clock, X, Users, Trash2, UserPlus, AlertTriangle, Pencil } from 'lucide-react';
 import { apiGet, apiPost, apiDelete, apiPatch } from '../../lib/api';
 import type { Plano, Tenant, TerminalRequest, Fatura, TenantMember, ClinicAccount, EmpresaPlano } from '../../lib/types';
@@ -17,6 +17,9 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
   const [confirmar, setConfirmar] = useState<{ id: number; nome: string } | null>(null); // confirmação de contratação
   // Checkout PIX dentro do painel (sem mandar o cliente para fora).
   const [pagar, setPagar] = useState<{ id: number; valor: number; descricao: string } | null>(null);
+  // PIX MANUAL (chave CPF) — usado só para IMPLANTAÇÃO e suas parcelas: o cliente
+  // paga na chave e manda o comprovante no WhatsApp; a equipe dá a baixa.
+  const [pixManual, setPixManual] = useState<{ id: number; valor: number; descricao: string } | null>(null);
   const [descontratar, setDescontratar] = useState<{ id: number; nome: string } | null>(null); // confirmação de descontratação
   const [excluirEmpresa, setExcluirEmpresa] = useState<{ id: number; nome: string; terminais: number } | null>(null); // confirmação de exclusão de empresa
   const [processando, setProcessando] = useState(false);
@@ -357,7 +360,14 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
                 <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 700 }}>{brl(f.valor)}</span>
                 <span style={{ fontWeight: 600, color: cor, fontSize: 12 }}>{rotulo}</span>
                 <span style={{ textAlign: 'right' }}>
-                  {podePagar ? (
+                  {f.status !== 'pago' && f.tipo === 'implantacao' ? (
+                    // IMPLANTAÇÃO (e parcelas): PIX na chave CPF + comprovante no
+                    // WhatsApp. A baixa é feita pela equipe (não passa pelo Asaas).
+                    <button onClick={() => setPixManual({ id: f.id, valor: f.valor, descricao: f.descricao || f.tipo })}
+                       style={{ padding: '7px 14px', borderRadius: 8, border: 'none', background: vencida ? 'var(--c-warn)' : 'var(--c-blued)', color: '#fff', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                      Pagar
+                    </button>
+                  ) : podePagar ? (
                     // Checkout DENTRO do painel (PIX). A baixa chega sozinha
                     // por webhook — o cliente não precisa avisar ninguém.
                     <button onClick={() => setPagar({ id: f.id, valor: f.valor, descricao: f.descricao || f.tipo })}
@@ -386,6 +396,8 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
           }}
         />
       )}
+
+      {pixManual && <PixManualModal fatura={pixManual} onClose={() => setPixManual(null)} />}
 
       {novaEmpresa && <NovaEmpresaModal onClose={() => setNovaEmpresa(false)} onSaved={async () => { setNovaEmpresa(false); await carregar(); showToast({ title: 'Empresa cadastrada', msg: 'A taxa será definida pelo administrador.', kind: 'ok' }); }} onErr={(m) => showToast({ title: 'Falha', msg: m, kind: 'err' })} />}
 
@@ -821,6 +833,85 @@ function CheckoutPix({ fatura, onClose, onPago }: { fatura: { id: number; valor:
             )}
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * PIX MANUAL — só para IMPLANTAÇÃO (e suas parcelas). Mostra a chave CPF, o
+ * favorecido e o banco; o cliente paga e manda o COMPROVANTE no WhatsApp para a
+ * equipe dar a baixa. Não passa pelo Asaas de propósito (a implantação é
+ * combinada por fora).
+ */
+function PixManualModal({ fatura, onClose }: { fatura: { id: number; valor: number; descricao: string }; onClose: () => void }) {
+  const CHAVE = '745.303.211-34';
+  const CHAVE_DIGITOS = '74530321134';
+  const FAVORECIDO = 'Gabriel Vasconcelos Pimentel Rodrigues';
+  const BANCO = 'PicPay';
+  const WHATS = '5561984851896';
+  const [copiado, setCopiado] = useState(false);
+
+  const copiar = async () => {
+    try {
+      await navigator.clipboard.writeText(CHAVE_DIGITOS);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2500);
+    } catch { /* sem permissão — a chave fica visível para copiar à mão */ }
+  };
+
+  const msg = encodeURIComponent(
+    `Olá! Segue o comprovante do PIX da ${fatura.descricao} no valor de ${brl(fatura.valor)}.`,
+  );
+  const linkWhats = `https://wa.me/${WHATS}?text=${msg}`;
+
+  const Linha = ({ rotulo, valor, acao }: { rotulo: string; valor: string; acao?: ReactNode }) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--c-border)' }}>
+      <div style={{ textAlign: 'left', minWidth: 0 }}>
+        <div style={{ color: 'var(--c-ink3)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' }}>{rotulo}</div>
+        <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 700, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis' }}>{valor}</div>
+      </div>
+      {acao}
+    </div>
+  );
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 120, background: 'rgba(7,11,22,.72)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} className="ia-card" style={{ width: 440, maxWidth: '100%', padding: 26, animation: 'ia-slide .22s ease' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ color: 'var(--c-ink)', fontSize: 17, fontWeight: 700 }}>Pagar implantação com PIX</div>
+            <div style={{ color: 'var(--c-ink3)', fontSize: 12.5, marginTop: 2 }}>{fatura.descricao}</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--c-ink3)', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
+        </div>
+
+        <div style={{ textAlign: 'center', color: 'var(--c-ink)', fontSize: 30, fontWeight: 800, margin: '16px 0 6px' }}>{brl(fatura.valor)}</div>
+
+        <div style={{ background: 'var(--c-surface2)', borderRadius: 12, padding: '4px 16px', marginTop: 10 }}>
+          <Linha
+            rotulo="Chave PIX (CPF)"
+            valor={CHAVE}
+            acao={<button onClick={copiar} className="ia-btn" style={{ padding: '0 16px', height: 36, fontSize: 13, whiteSpace: 'nowrap' }}>{copiado ? 'Copiado!' : 'Copiar'}</button>}
+          />
+          <Linha rotulo="Favorecido" valor={FAVORECIDO} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 0' }}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ color: 'var(--c-ink3)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' }}>Banco</div>
+              <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 700, marginTop: 2 }}>{BANCO}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Aviso do comprovante — sem ele a equipe não tem como dar baixa. */}
+        <div style={{ marginTop: 16, padding: '12px 14px', borderRadius: 10, background: 'var(--c-warnsoft)', color: 'var(--c-warnfg)', fontSize: 12.5, lineHeight: 1.5, textAlign: 'left' }}>
+          Após pagar, <b>envie o comprovante no WhatsApp</b> para liberarmos o acesso. A confirmação é feita pela nossa equipe.
+        </div>
+
+        <a href={linkWhats} target="_blank" rel="noopener noreferrer"
+           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 12, padding: '12px 16px', borderRadius: 10, background: '#25D366', color: '#fff', fontSize: 14, fontWeight: 700, textDecoration: 'none' }}>
+          Enviar comprovante no WhatsApp
+        </a>
       </div>
     </div>
   );
