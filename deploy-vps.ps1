@@ -20,7 +20,11 @@ function Assert-Ok($passo) {
 }
 
 $REPO = Split-Path -Parent $MyInvocation.MyCommand.Path
-$CHAVE = "$env:USERPROFILE\.ssh\id_rsa"
+# Aceita ed25519 (preferida) ou a rsa antiga — assim o deploy funciona tanto
+# nesta maquina quanto na que ja tinha a chave original.
+$CHAVE = @("$env:USERPROFILE\.ssh\id_ed25519", "$env:USERPROFILE\.ssh\id_rsa") |
+         Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $CHAVE) { $CHAVE = "$env:USERPROFILE\.ssh\id_ed25519" }
 
 Write-Host "==================================================" -ForegroundColor Cyan
 Write-Host "   Iniciando Deploy de Atualização para a VPS     " -ForegroundColor Cyan
