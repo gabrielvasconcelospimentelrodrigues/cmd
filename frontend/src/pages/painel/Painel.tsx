@@ -17,19 +17,21 @@ import { StatusPill, Card, ProgressBar, fmtMilhar, brl, economia, fichaTone, ton
 import Pendencias from './Pendencias';
 import Config from './Config';
 import Planos from './Planos';
+import Relatorios from './Relatorios';
 import { RoboAoVivo, RoboAoVivoModal } from './RoboAoVivo';
-import { Maximize2 } from 'lucide-react';
+import { Maximize2, BarChart3 } from 'lucide-react';
 
-type Page = 'painel' | 'enviar' | 'pendencias' | 'planos' | 'config';
+type Page = 'painel' | 'enviar' | 'pendencias' | 'relatorios' | 'planos' | 'config';
 const NAV: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { key: 'painel', label: 'Painel', icon: LayoutDashboard },
   { key: 'enviar', label: 'Fichas', icon: UploadCloud },
   { key: 'pendencias', label: 'Pendências', icon: Clock },
+  { key: 'relatorios', label: 'Relatórios', icon: BarChart3 },
   { key: 'planos', label: 'Meu plano', icon: Wallet },
   { key: 'config', label: 'Configurações', icon: SettingsIcon },
 ];
-const TITLE: Record<Page, string> = { painel: 'Painel', enviar: 'Fichas', pendencias: 'Pendências', planos: 'Meu plano', config: 'Configurações' };
-const SUB: Record<Page, string> = { painel: 'Resumo da operação', enviar: 'Importe planilhas e acompanhe os envios', pendencias: 'Fichas que precisam de atenção', planos: 'Empresas, terminais e cobrança', config: 'Contas, automação e segurança' };
+const TITLE: Record<Page, string> = { painel: 'Painel', enviar: 'Fichas', pendencias: 'Pendências', relatorios: 'Relatórios', planos: 'Meu plano', config: 'Configurações' };
+const SUB: Record<Page, string> = { painel: 'Resumo da operação', enviar: 'Importe planilhas e acompanhe os envios', pendencias: 'Fichas que precisam de atenção', relatorios: 'Analítico das fichas importadas', planos: 'Empresas, terminais e cobrança', config: 'Contas, automação e segurança' };
 const OK = ['registered', 'verified_ok', 'verified_divergent', 'done_manually', 'done'];
 type StatsResp = { registrados: number; erros: number; pendentes: number; hoje: number; por_dia: { dia: string; n: number }[]; erros_por_tipo: { motivo: string; n: number }[]; media_cadastros_dia: number; dias_ativos: number; funcionarios_operacao: number; cadastros_dia_por_funcionario: number; funcionarios_equivalentes_real: number };
 
@@ -300,6 +302,9 @@ export default function Painel() {
           </div>
           <div style={{ display: page === 'pendencias' ? 'block' : 'none' }}>
             <Pendencias patients={patientsView} uploads={uploadsView} onChange={carregar} showToast={showToast} />
+          </div>
+          <div style={{ display: page === 'relatorios' ? 'block' : 'none' }}>
+            <Relatorios contas={contas} empresas={empresas} isMember={isMember} filtroMembro={filtroMembro} filtroEmpresa={filtroEmpresa} ativo={page === 'relatorios'} />
           </div>
           <div style={{ display: page === 'planos' ? 'block' : 'none' }}>
             <Planos

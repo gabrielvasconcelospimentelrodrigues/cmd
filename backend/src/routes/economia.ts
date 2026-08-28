@@ -86,7 +86,7 @@ export async function economiaRoutes(app: FastifyInstance): Promise<void> {
     if (activeEmpresaId) {
       sql += ` AND (e.clinic_account_id IN (
         SELECT id FROM clinic_accounts WHERE empresa_id = $${params.length + 1}
-      ) OR e.paciente_record_id IN (
+      ) OR e.patient_record_id IN (
         SELECT pr.id FROM patient_records pr
         JOIN uploads u ON u.id = pr.upload_id
         WHERE u.empresa_id = $${params.length + 1}
@@ -97,7 +97,7 @@ export async function economiaRoutes(app: FastifyInstance): Promise<void> {
     if (activeMemberId) {
       sql += ` AND (e.clinic_account_id IN (
         SELECT id FROM clinic_accounts WHERE member_user_id = $${params.length + 1}::uuid
-      ) OR e.paciente_record_id IN (
+      ) OR e.patient_record_id IN (
         SELECT pr.id FROM patient_records pr
         JOIN uploads u ON u.id = pr.upload_id
         WHERE u.uploaded_by = $${params.length + 1}::uuid
