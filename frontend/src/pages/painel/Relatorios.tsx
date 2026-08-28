@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { CalendarRange, Stethoscope, Layers, Clock3, RotateCcw } from 'lucide-react';
 import { apiGet } from '../../lib/api';
 import { Card, brl, fmtMilhar } from './parts';
@@ -106,28 +106,51 @@ export default function Relatorios({
     if (situacao !== 'todas') q.push(`situacao=${situacao}`);
     if (medico) q.push(`medico=${encodeURIComponent(medico)}`);
     if (!isMember && conta) q.push(`clinic_account_id=${conta}`);
-    if (!isMember && empresa) q.push(`empresa_id=${empresa}`);
     if (filtroMembro) q.push(`member_user_id=${filtroMembro}`);
-    if (filtroEmpresa) q.push(`empresa_id=${filtroEmpresa}`);
+    // Uma empresa só na querystring: o filtro global do painel manda, e o
+    // select local vale quando não há filtro global. Mandar empresa_id duas
+    // vezes faria o backend usar a primeira e ignorar a escolha da tela.
+    const empresaAtiva = filtroEmpresa || (isMember ? '' : empresa);
+    if (empresaAtiva) q.push(`empresa_id=${empresaAtiva}`);
     return q.join('&');
   }, [base, inicio, fim, modalidade, faixa, situacao, medico, conta, empresa, isMember, filtroMembro, filtroEmpresa]);
 
+  /**
+   * Numera as buscas para descartar resposta atrasada.
+   *
+   * O relatório leva de 150ms a 600ms conforme o recorte, então trocar de
+   * filtro rápido deixa duas consultas no ar — e a antiga pode voltar DEPOIS
+   * da nova. Sem esta guarda, a resposta velha sobrescrevia a tela e o filtro
+   * parecia não ter pegado.
+   */
+  const buscaAtual = useRef(0);
+
   const carregar = useCallback(async () => {
+    const minha = ++buscaAtual.current;
     setCarregando(true);
     setErro(null);
     try {
-      setDados(await apiGet<Relatorio>(`/relatorios/fichas?${query}`));
+      const resp = await apiGet<Relatorio>(`/relatorios/fichas?${query}`);
+      if (minha !== buscaAtual.current) return; // já existe busca mais nova
+      setDados(resp);
     } catch (e) {
+      if (minha !== buscaAtual.current) return;
       setErro(e instanceof Error ? e.message : 'Não foi possível carregar o relatório.');
       setDados(null);
     } finally {
-      setCarregando(false);
+      if (minha === buscaAtual.current) setCarregando(false);
     }
   }, [query]);
 
   // Só busca com a aba aberta: as páginas ficam montadas com display:none e
-  // recarregar em segundo plano seria consulta jogada fora.
-  useEffect(() => { if (ativo) void carregar(); }, [ativo, carregar]);
+  // recarregar em segundo plano seria consulta jogada fora. O atraso curto
+  // agrupa mudanças em sequência (mexer nas duas datas dispara uma busca, não
+  // duas) sem que a tela pareça travada.
+  useEffect(() => {
+    if (!ativo) return;
+    const t = setTimeout(() => { void carregar(); }, 250);
+    return () => clearTimeout(t);
+  }, [ativo, carregar]);
   useEffect(() => {
     if (!ativo || medicos.length) return;
     apiGet<string[]>('/relatorios/medicos').then(setMedicos).catch(() => setMedicos([]));
@@ -150,6 +173,11 @@ export default function Relatorios({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--c-ink)', fontSize: 15, fontWeight: 700 }}>
             <CalendarRange size={17} style={{ color: 'var(--c-ink3)' }} /> Filtros
+            {carregando && (
+              <span style={{ color: 'var(--c-ink3)', fontSize: 12, fontWeight: 600, animation: 'ia-pulse 1.2s ease-in-out infinite' }}>
+                atualizando…
+              </span>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {([['mes', 'Este mês'], ['mes_passado', 'Mês passado'], ['noventa', '90 dias'], ['ano', 'Este ano']] as const).map(([k, rot]) => (
