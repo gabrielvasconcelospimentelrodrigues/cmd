@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { CalendarRange, Stethoscope, Layers, Clock3, RotateCcw, AlertTriangle } from 'lucide-react';
+import { CalendarRange, Stethoscope, Layers, Clock3, RotateCcw, AlertTriangle, SlidersHorizontal, ChevronDown, ChevronUp } from 'lucide-react';
 import { apiGet, type ApiError } from '../../lib/api';
 import { Card, brl, fmtMilhar } from './parts';
 
@@ -80,10 +80,32 @@ function mensagemDeErro(e: unknown): string {
 }
 
 const inp: CSSProperties = {
-  boxSizing: 'border-box', width: '100%', height: 38, background: 'var(--c-input)',
+  boxSizing: 'border-box', width: '100%', height: 42, background: 'var(--c-input)',
   border: '1.5px solid var(--c-border2)', borderRadius: 9, padding: '0 10px',
-  color: 'var(--c-ink)', fontFamily: 'inherit', fontSize: 13.5,
+  color: 'var(--c-ink)', fontFamily: 'inherit', fontSize: 15,
 };
+
+/**
+ * Tela estreita (celular).
+ *
+ * Aqui não basta CSS: no celular a tabela vira lista de cartões e o painel de
+ * filtros deixa de existir até ser aberto — são árvores diferentes, não a
+ * mesma coisa reposicionada. Por isso a decisão precisa chegar ao JSX.
+ */
+function useEstreito(limite = 640): boolean {
+  const consulta = `(max-width: ${limite}px)`;
+  const [estreito, setEstreito] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(consulta).matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(consulta);
+    const aoMudar = (e: MediaQueryListEvent) => setEstreito(e.matches);
+    setEstreito(mq.matches);
+    mq.addEventListener('change', aoMudar);
+    return () => mq.removeEventListener('change', aoMudar);
+  }, [consulta]);
+  return estreito;
+}
 
 export default function Relatorios({
   contas = [],
@@ -115,6 +137,19 @@ export default function Relatorios({
   const [medicos, setMedicos] = useState<string[]>([]);
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+
+  const estreito = useEstreito();
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false);
+  // No celular os campos ficam guardados: nove selects empurravam o relatório
+  // inteiro para baixo da dobra, e quem abre a tela quer ver o número primeiro.
+  const mostrarCampos = !estreito || filtrosAbertos;
+
+  // Quantos filtros fogem do padrão — vira o contador do botão, para o usuário
+  // saber que há recorte ativo sem precisar abrir o painel.
+  const ativos = [
+    modalidade !== 'todas', faixa !== 'todas', situacao !== 'todas',
+    !!medico, !!conta, !!empresa, base !== 'atendimento',
+  ].filter(Boolean).length;
 
   const query = useMemo(() => {
     const q: string[] = [`base=${base}`];
@@ -187,28 +222,70 @@ export default function Relatorios({
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
-      {/* ---- FILTROS: uma faixa só, acima de tudo ---- */}
-      <Card style={{ padding: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--c-ink)', fontSize: 15, fontWeight: 700 }}>
-            <CalendarRange size={17} style={{ color: 'var(--c-ink3)' }} /> Filtros
+      {/* ---- FILTROS ---- */}
+      <Card style={{ padding: estreito ? 12 : 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+          {/* No celular o cabeçalho vira o próprio botão: um toque abre e
+              fecha o painel, e o contador mostra que há recorte ativo. */}
+          <button
+            onClick={() => estreito && setFiltrosAbertos((v) => !v)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, minWidth: 0,
+              background: 'transparent', border: 'none', padding: 0,
+              color: 'var(--c-ink)', fontSize: 15, fontWeight: 700,
+              fontFamily: 'inherit', cursor: estreito ? 'pointer' : 'default',
+            }}
+          >
+            <SlidersHorizontal size={17} style={{ color: 'var(--c-ink3)', flex: 'none' }} />
+            Filtros
+            {ativos > 0 && (
+              <span style={{ flex: 'none', fontSize: 11, fontWeight: 800, color: '#fff', background: 'var(--c-blued)', borderRadius: 999, padding: '2px 7px' }}>{ativos}</span>
+            )}
+            {estreito && (mostrarCampos ? <ChevronUp size={16} style={{ color: 'var(--c-ink3)' }} /> : <ChevronDown size={16} style={{ color: 'var(--c-ink3)' }} />)}
             {carregando && (
               <span style={{ color: 'var(--c-ink3)', fontSize: 12, fontWeight: 600, animation: 'ia-pulse 1.2s ease-in-out infinite' }}>
                 atualizando…
               </span>
             )}
-          </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {([['mes', 'Este mês'], ['mes_passado', 'Mês passado'], ['noventa', '90 dias'], ['ano', 'Este ano']] as const).map(([k, rot]) => (
-              <button key={k} onClick={() => { const p = atalho(k); setInicio(p.inicio); setFim(p.fim); }}
-                className="ia-btn-outline" style={{ padding: '0 11px', height: 30, fontSize: 12 }}>{rot}</button>
-            ))}
-            <button onClick={() => { setInicio(''); setFim(''); }} className="ia-btn-outline" style={{ padding: '0 11px', height: 30, fontSize: 12 }}>Tudo</button>
-            <button onClick={limpar} title="Voltar aos filtros padrão" className="ia-btn-outline" style={{ padding: '0 10px', height: 30, fontSize: 12 }}><RotateCcw size={13} /></button>
-          </div>
+          </button>
+          {!estreito && (
+            <button onClick={limpar} title="Voltar aos filtros padrão" className="ia-btn-outline" style={{ padding: '0 10px', height: 32, fontSize: 12 }}><RotateCcw size={13} /></button>
+          )}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+        {/* Período por atalho fica SEMPRE visível, mesmo com o painel fechado:
+            é o filtro que mais se troca, e escondê-lo custaria dois toques. */}
+        <div className="r-wrap" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+          {([['mes', 'Este mês'], ['mes_passado', 'Mês passado'], ['noventa', '90 dias'], ['ano', 'Este ano'], ['tudo', 'Tudo']] as const).map(([k, rot]) => {
+            const p = k === 'tudo' ? { inicio: '', fim: '' } : atalho(k);
+            const ativo = inicio === p.inicio && fim === p.fim;
+            return (
+              <button
+                key={k}
+                onClick={() => { setInicio(p.inicio); setFim(p.fim); }}
+                style={{
+                  flex: estreito ? '1 1 auto' : 'none',
+                  padding: '0 12px', height: estreito ? 36 : 30, borderRadius: 8,
+                  border: `1px solid ${ativo ? 'var(--c-blued)' : 'var(--c-border2)'}`,
+                  background: ativo ? 'var(--c-blued)' : 'transparent',
+                  color: ativo ? '#fff' : 'var(--c-ink2)',
+                  fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer',
+                }}
+              >
+                {rot}
+              </button>
+            );
+          })}
+        </div>
+
+        {!mostrarCampos && (
+          <div style={{ marginTop: 10, color: 'var(--c-ink3)', fontSize: 12.5 }}>
+            {inicio || fim ? `${dataBR(inicio || null)} a ${dataBR(fim || null)}` : 'Todo o período'} · toque em Filtros para refinar
+          </div>
+        )}
+
+        {mostrarCampos && (
+        <div style={{ display: 'grid', gridTemplateColumns: estreito ? '1fr' : 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginTop: 12 }}>
           <div>
             <label className="ia-label">De</label>
             <input type="date" value={inicio} onChange={(e) => setInicio(e.target.value)} style={inp} />
@@ -278,6 +355,18 @@ export default function Relatorios({
             </div>
           )}
         </div>
+        )}
+
+        {mostrarCampos && estreito && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <button onClick={limpar} className="ia-btn-outline" style={{ flex: 1, height: 40, fontSize: 13 }}>
+              <RotateCcw size={14} /> Limpar
+            </button>
+            <button onClick={() => setFiltrosAbertos(false)} className="ia-btn" style={{ flex: 1, height: 40, fontSize: 13 }}>
+              Ver resultado
+            </button>
+          </div>
+        )}
       </Card>
 
       {erro && (
@@ -302,13 +391,13 @@ export default function Relatorios({
       {dados && r && ec && (
         <>
           {/* ---- NÚMEROS DO RECORTE ---- */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(148px, 1fr))', gap: 12 }}>
-            <Tile rotulo="Fichas no período" valor={fmtMilhar(r.total)} nota={`${fmtMilhar(r.listas)} lista(s) · ${fmtMilhar(r.medicos)} profissional(is)`} />
+          <div style={{ display: 'grid', gridTemplateColumns: estreito ? 'repeat(2, minmax(0, 1fr))' : 'repeat(auto-fit, minmax(148px, 1fr))', gap: estreito ? 10 : 12 }}>
+            <Tile rotulo="Fichas no período" valor={fmtMilhar(r.total)} nota={`${fmtMilhar(r.listas)} lista(s) · ${fmtMilhar(r.medicos)} profissional(is)`} largo={estreito} />
             <Tile rotulo="OCI" valor={fmtMilhar(r.oci)} nota={pct(r.oci, r.total)} cor={COR_OCI} />
             <Tile rotulo="Cirurgia" valor={fmtMilhar(r.cirurgia)} nota={pct(r.cirurgia, r.total)} cor={COR_CIR} />
             <Tile rotulo="0 a 8 anos" valor={fmtMilhar(r.faixa_0_8)} nota={pct(r.faixa_0_8, r.total)} />
             <Tile rotulo="9 anos ou mais" valor={fmtMilhar(r.faixa_9_mais)} nota={pct(r.faixa_9_mais, r.total)} />
-            <Tile rotulo="Economia no período" valor={brl(ec.valor)} nota={`${fmtMilhar(Math.round(ec.horas))} h poupadas`} />
+            <Tile rotulo="Economia no período" valor={brl(ec.valor)} nota={`${fmtMilhar(Math.round(ec.horas))} h poupadas`} largo={estreito} />
           </div>
 
           {/* ---- COMPOSIÇÃO ---- */}
@@ -316,7 +405,7 @@ export default function Relatorios({
             <Titulo icone={<Layers size={16} />} texto="Composição do período" />
             <Legenda />
             <BarraEmpilhada oci={r.oci} cirurgia={r.cirurgia} />
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginTop: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: estreito ? '1fr' : 'repeat(auto-fit, minmax(140px, 1fr))', gap: estreito ? 10 : 12, marginTop: 16 }}>
               <Linha rotulo="Cadastradas no CMD" valor={r.registradas} total={r.total} />
               <Linha rotulo="Aguardando cadastro" valor={r.pendentes} total={r.total} />
               <Linha rotulo="Em pendência" valor={r.revisao} total={r.total} />
@@ -353,7 +442,7 @@ export default function Relatorios({
               <>
                 <Legenda />
                 <PorMedico dados={dados.por_medico} />
-                <TabelaMedicos dados={dados.por_medico} />
+                {estreito ? <ListaMedicos dados={dados.por_medico} /> : <TabelaMedicos dados={dados.por_medico} />}
               </>
             )}
           </Card>
@@ -361,7 +450,7 @@ export default function Relatorios({
           {/* ---- POR LISTA IMPORTADA ---- */}
           <Card style={{ padding: 18 }}>
             <Titulo icone={<Clock3 size={16} />} texto="Por lista importada" />
-            {dados.por_lista.length === 0 ? <Vazio /> : <TabelaListas dados={dados.por_lista} />}
+            {dados.por_lista.length === 0 ? <Vazio /> : estreito ? <ListaListas dados={dados.por_lista} /> : <TabelaListas dados={dados.por_lista} />}
           </Card>
         </>
       )}
@@ -399,12 +488,12 @@ function Legenda() {
   );
 }
 
-function Tile({ rotulo, valor, nota, cor }: { rotulo: string; valor: string; nota: string; cor?: string }) {
+function Tile({ rotulo, valor, nota, cor, largo }: { rotulo: string; valor: string; nota: string; cor?: string; largo?: boolean }) {
   return (
     // minWidth 0 no cartão e no rótulo: sem isso o item do grid adota a largura
     // do conteúdo e o valor ("R$ 8.415,91") empurra a coluna para fora da tela
     // no celular, em vez de reduzir junto com ela.
-    <Card style={{ padding: 14, minWidth: 0 }}>
+    <Card style={{ padding: 14, minWidth: 0, gridColumn: largo ? '1 / -1' : undefined }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, color: 'var(--c-ink3)', fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em' }}>
         {cor && <span style={{ width: 8, height: 8, borderRadius: 2, background: cor, flex: 'none' }} />}
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rotulo}</span>
@@ -455,11 +544,12 @@ function Linha({ rotulo, valor, total }: { rotulo: string; valor: number; total:
 function SerieMensal({ dados }: { dados: Relatorio['por_mes'] }) {
   const max = Math.max(...dados.map((d) => d.total), 1);
   return (
-    /* O r-scroll-x aplica min-width nos FILHOS DIRETOS. Por isso o gráfico fica
-       dentro de um único filho: sem esse invólucro, cada coluna de mês é que
-       ganharia a largura mínima e o gráfico explodiria no celular. */
-    <div className="r-scroll-x" style={{ overflowX: 'auto' }}>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', minHeight: 160, paddingTop: 6 }}>
+    /* Sem a classe r-scroll-x de propósito: ela impõe 640px de largura mínima,
+       o que faria o gráfico rolar de lado mesmo quando os meses cabem na tela.
+       Aqui a largura mínima vem da quantidade de meses, então só rola quando
+       realmente não cabe. */
+    <div style={{ overflowX: 'auto' }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', minHeight: 160, paddingTop: 6, minWidth: Math.min(dados.length * 54, 640) }}>
         {dados.map((d) => {
           const h = Math.max(4, (d.total / max) * 120);
           const hOci = d.total > 0 ? (d.oci / d.total) * h : 0;
@@ -520,6 +610,65 @@ function PorMedico({ dados }: { dados: Relatorio['por_medico'] }) {
 
 const th: CSSProperties = { textAlign: 'right', padding: '8px 10px', color: 'var(--c-ink3)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap' };
 const td: CSSProperties = { textAlign: 'right', padding: '9px 10px', color: 'var(--c-ink)', fontSize: 13, whiteSpace: 'nowrap' };
+
+/** Par rótulo/valor das listas de celular. */
+function Dado({ rot, v }: { rot: string; v: number }) {
+  return (
+    <span style={{ display: 'inline-flex', gap: 5, alignItems: 'baseline', fontSize: 12.5 }}>
+      <span style={{ color: 'var(--c-ink3)' }}>{rot}</span>
+      <b style={{ color: 'var(--c-ink)' }}>{fmtMilhar(v)}</b>
+    </span>
+  );
+}
+
+/**
+ * No celular a tabela vira lista: sete colunas não cabem em 360px, e rolar a
+ * tabela de lado esconde justamente as colunas da direita — que aqui são as
+ * faixas etárias, o motivo de o relatório existir.
+ */
+function ListaMedicos({ dados }: { dados: Relatorio['por_medico'] }) {
+  return (
+    <div style={{ borderTop: '1px solid var(--c-border)' }}>
+      {dados.map((m) => (
+        <div key={m.medico} style={{ padding: '12px 0', borderBottom: '1px solid var(--c-border)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
+            <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.medico}</span>
+            <b style={{ color: 'var(--c-ink)', fontSize: 15, flex: 'none' }}>{fmtMilhar(m.total)}</b>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginTop: 6 }}>
+            <Dado rot="OCI" v={m.oci} />
+            <Dado rot="Cirurgia" v={m.cirurgia} />
+            <Dado rot="0 a 8" v={m.faixa_0_8} />
+            <Dado rot="9+" v={m.faixa_9_mais} />
+            <Dado rot="Cadastradas" v={m.registradas} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ListaListas({ dados }: { dados: Relatorio['por_lista'] }) {
+  return (
+    <div style={{ borderTop: '1px solid var(--c-border)' }}>
+      {dados.map((l) => (
+        <div key={l.upload_id} style={{ padding: '12px 0', borderBottom: '1px solid var(--c-border)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
+            <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.lista}</span>
+            <b style={{ color: 'var(--c-ink)', fontSize: 15, flex: 'none' }}>{fmtMilhar(l.total)}</b>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginTop: 6 }}>
+            <Dado rot="Cirurgia" v={l.cirurgia} />
+            <Dado rot="Cadastradas" v={l.registradas} />
+            <span style={{ color: 'var(--c-ink3)', fontSize: 12.5 }}>
+              {l.enviado_em ? new Date(l.enviado_em).toLocaleDateString('pt-BR') : '—'}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** Os mesmos números da barra, em texto. É o que garante que o relatório seja
  * legível sem depender de enxergar cor. */
