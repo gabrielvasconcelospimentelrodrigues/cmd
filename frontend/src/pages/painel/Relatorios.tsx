@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { CalendarRange, Stethoscope, Layers, Clock3, RotateCcw } from 'lucide-react';
-import { apiGet } from '../../lib/api';
+import { CalendarRange, Stethoscope, Layers, Clock3, RotateCcw, AlertTriangle } from 'lucide-react';
+import { apiGet, type ApiError } from '../../lib/api';
 import { Card, brl, fmtMilhar } from './parts';
 
 /* ============================================================================
@@ -59,6 +59,25 @@ function rotuloMes(mes: string): string {
   return `${MES_CURTO[Number(m) - 1] ?? m}/${(a ?? '').slice(2)}`;
 }
 const dataBR = (d: string | null) => (d ? d.split('-').reverse().join('/') : '—');
+
+/**
+ * Traduz a falha da API para algo que o usuário do painel entenda.
+ *
+ * O 404 é o caso concreto que já aconteceu: o frontend foi publicado antes do
+ * backend, então a tela existia mas a rota não. Mostrar "Not Found" cru fazia
+ * parecer defeito da conta do cliente — a causa era o servidor estar numa
+ * versão anterior.
+ */
+function mensagemDeErro(e: unknown): string {
+  const status = (e as ApiError)?.status;
+  if (status === 404) {
+    return 'O relatório ainda não está disponível nesta versão do servidor. A tela já foi publicada, mas a atualização da API está pendente — avise o suporte se isto continuar após algumas horas.';
+  }
+  if (status === 403) return 'Seu usuário não tem permissão para ver este relatório.';
+  if (status && status >= 500) return 'O servidor não conseguiu montar o relatório agora. Tente de novo em alguns instantes.';
+  if (e instanceof Error && e.message) return e.message;
+  return 'Não foi possível carregar o relatório.';
+}
 
 const inp: CSSProperties = {
   boxSizing: 'border-box', width: '100%', height: 38, background: 'var(--c-input)',
@@ -135,7 +154,7 @@ export default function Relatorios({
       setDados(resp);
     } catch (e) {
       if (minha !== buscaAtual.current) return;
-      setErro(e instanceof Error ? e.message : 'Não foi possível carregar o relatório.');
+      setErro(mensagemDeErro(e));
       setDados(null);
     } finally {
       if (minha === buscaAtual.current) setCarregando(false);
@@ -262,7 +281,18 @@ export default function Relatorios({
       </Card>
 
       {erro && (
-        <Card style={{ padding: 16, color: 'var(--c-errfg)', fontSize: 13.5 }}>{erro}</Card>
+        <Card style={{ padding: 22, display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+          <span style={{ flex: 'none', width: 34, height: 34, borderRadius: 9, background: 'var(--c-errsoft)', color: 'var(--c-errfg)', display: 'grid', placeItems: 'center' }}>
+            <AlertTriangle size={17} />
+          </span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: 'var(--c-ink)', fontSize: 14.5, fontWeight: 700, marginBottom: 3 }}>Relatório indisponível</div>
+            <div style={{ color: 'var(--c-ink2)', fontSize: 13, lineHeight: 1.5 }}>{erro}</div>
+            <button onClick={() => void carregar()} className="ia-btn-outline" style={{ marginTop: 12, padding: '0 14px', height: 32, fontSize: 12.5 }}>
+              Tentar de novo
+            </button>
+          </div>
+        </Card>
       )}
 
       {carregando && !dados && (
