@@ -19,6 +19,9 @@ logs/
 # Contexto legado (repos antigos clonados só p/ referência)
 .contexto-antigo/
 
+# Pacote temporario do deploy (deploy-vps.ps1)
+cmd-saas-update.tar
+
 # Sistema
 .DS_Store
 Thumbs.db
