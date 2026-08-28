@@ -208,7 +208,7 @@ export default function Relatorios({
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
           <div>
             <label className="ia-label">De</label>
             <input type="date" value={inicio} onChange={(e) => setInicio(e.target.value)} style={inp} />
@@ -302,7 +302,7 @@ export default function Relatorios({
       {dados && r && ec && (
         <>
           {/* ---- NÚMEROS DO RECORTE ---- */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(148px, 1fr))', gap: 12 }}>
             <Tile rotulo="Fichas no período" valor={fmtMilhar(r.total)} nota={`${fmtMilhar(r.listas)} lista(s) · ${fmtMilhar(r.medicos)} profissional(is)`} />
             <Tile rotulo="OCI" valor={fmtMilhar(r.oci)} nota={pct(r.oci, r.total)} cor={COR_OCI} />
             <Tile rotulo="Cirurgia" valor={fmtMilhar(r.cirurgia)} nota={pct(r.cirurgia, r.total)} cor={COR_CIR} />
@@ -316,7 +316,7 @@ export default function Relatorios({
             <Titulo icone={<Layers size={16} />} texto="Composição do período" />
             <Legenda />
             <BarraEmpilhada oci={r.oci} cirurgia={r.cirurgia} />
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginTop: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginTop: 16 }}>
               <Linha rotulo="Cadastradas no CMD" valor={r.registradas} total={r.total} />
               <Linha rotulo="Aguardando cadastro" valor={r.pendentes} total={r.total} />
               <Linha rotulo="Em pendência" valor={r.revisao} total={r.total} />
@@ -401,13 +401,17 @@ function Legenda() {
 
 function Tile({ rotulo, valor, nota, cor }: { rotulo: string; valor: string; nota: string; cor?: string }) {
   return (
-    <Card style={{ padding: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--c-ink3)', fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em' }}>
+    // minWidth 0 no cartão e no rótulo: sem isso o item do grid adota a largura
+    // do conteúdo e o valor ("R$ 8.415,91") empurra a coluna para fora da tela
+    // no celular, em vez de reduzir junto com ela.
+    <Card style={{ padding: 14, minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, color: 'var(--c-ink3)', fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em' }}>
         {cor && <span style={{ width: 8, height: 8, borderRadius: 2, background: cor, flex: 'none' }} />}
-        {rotulo}
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rotulo}</span>
       </div>
-      <div style={{ color: 'var(--c-ink)', fontSize: 26, fontWeight: 800, marginTop: 6, lineHeight: 1.1 }}>{valor}</div>
-      <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 3 }}>{nota}</div>
+      {/* clamp: encolhe a fonte em tela estreita sem precisar de media query */}
+      <div style={{ color: 'var(--c-ink)', fontSize: 'clamp(19px, 5.2vw, 26px)', fontWeight: 800, marginTop: 6, lineHeight: 1.15, overflowWrap: 'anywhere' }}>{valor}</div>
+      <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 3, overflowWrap: 'anywhere' }}>{nota}</div>
     </Card>
   );
 }
@@ -451,24 +455,29 @@ function Linha({ rotulo, valor, total }: { rotulo: string; valor: number; total:
 function SerieMensal({ dados }: { dados: Relatorio['por_mes'] }) {
   const max = Math.max(...dados.map((d) => d.total), 1);
   return (
-    <div className="r-scroll-x" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', minHeight: 160, paddingTop: 6, overflowX: 'auto' }}>
-      {dados.map((d) => {
-        const h = Math.max(4, (d.total / max) * 120);
-        const hOci = d.total > 0 ? (d.oci / d.total) * h : 0;
-        return (
-          <div key={d.mes} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, minWidth: 46, flex: '1 0 46px' }}>
-            <span style={{ color: 'var(--c-ink)', fontSize: 11.5, fontWeight: 700 }}>{fmtMilhar(d.total)}</span>
-            <div
-              title={`${rotuloMes(d.mes)} — total ${fmtMilhar(d.total)} · OCI ${fmtMilhar(d.oci)} · Cirurgia ${fmtMilhar(d.cirurgia)}`}
-              style={{ width: '100%', maxWidth: 40, height: h, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 2 }}
-            >
-              {d.cirurgia > 0 && <div style={{ height: Math.max(2, h - hOci), background: COR_CIR, borderRadius: '4px 4px 0 0' }} />}
-              {d.oci > 0 && <div style={{ height: Math.max(2, hOci), background: COR_OCI, borderRadius: d.cirurgia > 0 ? 0 : '4px 4px 0 0' }} />}
+    /* O r-scroll-x aplica min-width nos FILHOS DIRETOS. Por isso o gráfico fica
+       dentro de um único filho: sem esse invólucro, cada coluna de mês é que
+       ganharia a largura mínima e o gráfico explodiria no celular. */
+    <div className="r-scroll-x" style={{ overflowX: 'auto' }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', minHeight: 160, paddingTop: 6 }}>
+        {dados.map((d) => {
+          const h = Math.max(4, (d.total / max) * 120);
+          const hOci = d.total > 0 ? (d.oci / d.total) * h : 0;
+          return (
+            <div key={d.mes} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, minWidth: 44, flex: '1 0 44px' }}>
+              <span style={{ color: 'var(--c-ink)', fontSize: 11.5, fontWeight: 700 }}>{fmtMilhar(d.total)}</span>
+              <div
+                title={`${rotuloMes(d.mes)} — total ${fmtMilhar(d.total)} · OCI ${fmtMilhar(d.oci)} · Cirurgia ${fmtMilhar(d.cirurgia)}`}
+                style={{ width: '100%', maxWidth: 40, height: h, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 2 }}
+              >
+                {d.cirurgia > 0 && <div style={{ height: Math.max(2, h - hOci), background: COR_CIR, borderRadius: '4px 4px 0 0' }} />}
+                {d.oci > 0 && <div style={{ height: Math.max(2, hOci), background: COR_OCI, borderRadius: d.cirurgia > 0 ? 0 : '4px 4px 0 0' }} />}
+              </div>
+              <span style={{ color: 'var(--c-ink3)', fontSize: 11 }}>{rotuloMes(d.mes)}</span>
             </div>
-            <span style={{ color: 'var(--c-ink3)', fontSize: 11 }}>{rotuloMes(d.mes)}</span>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
