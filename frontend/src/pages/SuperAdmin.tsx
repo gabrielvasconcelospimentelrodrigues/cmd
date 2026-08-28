@@ -7,6 +7,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { useTheme, LogoMark, useToast, Toast, PasswordField, type ToastData } from '../components/iacmd/ui';
 import ProfileSecurity from '../components/iacmd/ProfileSecurity';
 import WhatsAppFab from '../components/iacmd/WhatsAppFab';
+import BotaoRecibo from '../components/iacmd/BotaoRecibo';
 import { mascaraCpfCnpj, validaCpfCnpj } from '../lib/documento';
 import { apiGet, apiPost, apiPatch, apiDelete, apiPut } from '../lib/api';
 import { Switch, brl } from './painel/parts';
@@ -1423,7 +1424,7 @@ function Financeiro({ showToast, onVerPlano }: { showToast: (t: { title: string;
           </div>
         }>Faturas emitidas</SectionTitle>
         <Card className="r-scroll-x" style={{ overflow: 'hidden', marginTop: 10 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 96px 84px 96px', padding: '9px 20px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)', fontSize: 11, fontWeight: 700, color: 'var(--c-ink3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 96px 84px 200px', padding: '9px 20px', borderBottom: '1px solid var(--c-border)', background: 'var(--c-surface2)', fontSize: 11, fontWeight: 700, color: 'var(--c-ink3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
             <span>Assinante / fatura</span><span style={{ textAlign: 'right' }}>Valor</span><span style={{ textAlign: 'center' }}>Status</span><span />
           </div>
           {faturas.length === 0 ? (
@@ -1431,14 +1432,25 @@ function Financeiro({ showToast, onVerPlano }: { showToast: (t: { title: string;
           ) : faturas.map((f) => {
             const cor = f.status === 'pago' ? 'var(--c-okfg)' : f.vencida ? 'var(--c-errfg)' : 'var(--c-ink3)';
             return (
-              <div key={f.id} style={{ display: 'grid', gridTemplateColumns: '1fr 96px 84px 96px', alignItems: 'center', gap: 8, padding: '11px 20px', borderBottom: '1px solid var(--c-border)' }}>
+              <div key={f.id} style={{ display: 'grid', gridTemplateColumns: '1fr 96px 84px 200px', alignItems: 'center', gap: 8, padding: '11px 20px', borderBottom: '1px solid var(--c-border)' }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 600 }}>{f.tenant_nome}</div>
                   <div style={{ color: 'var(--c-ink3)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.descricao || f.tipo} · vence {f.vencimento.split('-').reverse().join('/')}</div>
                 </div>
                 <span style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 700, textAlign: 'right' }}>{brl(f.valor)}</span>
                 <span style={{ textAlign: 'center', fontSize: 12, fontWeight: 700, color: cor }}>{f.status === 'pago' ? 'pago' : f.vencida ? 'vencida' : 'aberto'}</span>
-                <div style={{ textAlign: 'right' }}>
+                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                  {/* Depois da baixa, o recibo fica ao lado dela: é daqui que
+                      a equipe tira a 2ª via quando o cliente pede. */}
+                  {f.status === 'pago' && (
+                    <BotaoRecibo
+                      path={`/admin/faturas/${f.id}/recibo`}
+                      arquivo={`recibo-${f.id}.pdf`}
+                      onErro={(msg) => showToast({ title: 'Recibo indisponível', msg, kind: 'err' })}
+                      className="ia-btn-outline"
+                      style={{ padding: '0 10px', height: 30, fontSize: 12 }}
+                    />
+                  )}
                   <button onClick={() => baixa(f)} disabled={busy === f.id} className="ia-btn-outline" style={{ padding: '0 10px', height: 30, fontSize: 12, width: 88 }}>{busy === f.id ? '…' : f.status === 'pago' ? 'Reabrir' : 'Dar baixa'}</button>
                 </div>
               </div>
@@ -1557,6 +1569,82 @@ function TabelaPrecos({ showToast, onSaved }: { showToast: (t: { title: string; 
   );
 }
 
+/** Dados impressos em TODO recibo de pagamento (quem recebeu o dinheiro). */
+interface Emitente {
+  razao_social: string; documento: string; endereco: string; cidade_uf: string;
+  telefone: string; email: string; assinante: string; assinante_cargo: string;
+}
+
+/**
+ * Emitente dos recibos. Fica aqui, junto da tabela de preços, porque é a mesma
+ * natureza: parâmetro do negócio que vale para todos os assinantes. Sem a
+ * razão social preenchida, o botão "Recibo" recusa a emissão (412) — é o
+ * mínimo para o documento identificar quem recebeu.
+ */
+function DadosEmitente({ showToast }: { showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void }) {
+  const [e, setE] = useState<Emitente | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { (async () => { try { setE(await apiGet<Emitente>('/admin/emitente')); } catch { setE(null); } })(); }, []);
+
+  const salvar = async () => {
+    if (!e) return;
+    if (!e.razao_social.trim()) { showToast({ title: 'Falta a razão social', msg: 'É o mínimo para identificar quem recebeu o pagamento.', kind: 'err' }); return; }
+    if (e.documento.trim() && !validaCpfCnpj(e.documento)) { showToast({ title: 'CPF/CNPJ inválido', msg: 'Confira o documento do emitente.', kind: 'err' }); return; }
+    setSaving(true);
+    try {
+      setE(await apiPut<Emitente>('/admin/emitente', e));
+      showToast({ title: 'Dados do emitente salvos', msg: 'Já valem para os próximos recibos.', kind: 'ok' });
+    } catch (err) { showToast({ title: 'Falha', msg: (err as Error).message, kind: 'err' }); } finally { setSaving(false); }
+  };
+
+  if (!e) return <Card style={{ padding: 20, color: 'var(--c-ink3)', fontSize: 14 }}>Carregando dados do emitente…</Card>;
+
+  const inp: CSSProperties = { boxSizing: 'border-box', width: '100%', height: 40, background: 'var(--c-input)', border: '1.5px solid var(--c-border2)', borderRadius: 10, padding: '0 12px', color: 'var(--c-ink)', fontFamily: 'inherit', fontSize: 14 };
+  const campo = (rotulo: string, chave: keyof Emitente, dica?: string, mascara?: (v: string) => string) => (
+    <div>
+      <label className="ia-label">{rotulo}</label>
+      <input
+        value={e[chave]}
+        onChange={(ev) => setE({ ...e, [chave]: mascara ? mascara(ev.target.value) : ev.target.value })}
+        style={inp}
+      />
+      {dica && <div style={{ color: 'var(--c-ink3)', fontSize: 11.5, marginTop: 5 }}>{dica}</div>}
+    </div>
+  );
+
+  const faltaRazao = !e.razao_social.trim();
+
+  return (
+    <Card style={{ padding: 20, marginTop: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginBottom: 6 }}>
+        <div>
+          <div style={{ color: 'var(--c-ink)', fontSize: 16, fontWeight: 700 }}>Emitente dos recibos</div>
+          <div style={{ color: 'var(--c-ink3)', fontSize: 12.5, marginTop: 1 }}>Aparece no cabeçalho e na assinatura de todo recibo de pagamento que o cliente baixa.</div>
+        </div>
+        <button onClick={salvar} disabled={saving} className="ia-btn" style={{ padding: '10px 18px' }}>{saving ? 'Salvando…' : 'Salvar emitente'}</button>
+      </div>
+
+      {faltaRazao && (
+        <div style={{ margin: '10px 0 4px', padding: '10px 12px', borderRadius: 10, background: 'var(--c-warn)', color: '#fff', fontSize: 12.5, fontWeight: 600 }}>
+          Enquanto a razão social estiver em branco, nenhum recibo é emitido — nem pelo cliente, nem por aqui.
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginTop: 14 }}>
+        {campo('Razão social / nome', 'razao_social', 'Quem recebe o pagamento.')}
+        {campo('CNPJ ou CPF', 'documento', 'Opcional, mas se preenchido precisa ser válido.', mascaraCpfCnpj)}
+        {campo('Endereço', 'endereco', 'Rua, número, bairro.')}
+        {campo('Cidade / UF', 'cidade_uf', 'Também vira o local da assinatura ("São Paulo — SP, 28/08/2026").')}
+        {campo('Telefone', 'telefone')}
+        {campo('E-mail', 'email')}
+        {campo('Quem assina', 'assinante', 'Nome impresso sobre a linha de assinatura.')}
+        {campo('Cargo de quem assina', 'assinante_cargo', 'Ex.: Sócio-administrador.')}
+      </div>
+    </Card>
+  );
+}
+
 function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void }) {
   const [sel, setSel] = useState<number | null>(null);
   const [plano, setPlano] = useState<Plano | null>(null);
@@ -1670,6 +1758,7 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <TabelaPrecos showToast={showToast} onSaved={() => { if (sel) void abrir(sel); }} />
+      <DadosEmitente showToast={showToast} />
       <div className="r-cols-side" style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 16, alignItems: 'start' }}>
       <Card style={{ padding: 8 }}>
         <div style={{ color: 'var(--c-ink3)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', padding: '8px 10px' }}>Assinantes</div>
@@ -1838,6 +1927,16 @@ function Planos({ tenants, showToast }: { tenants: T[]; showToast: (t: { title: 
                     </div>
                     <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 700, width: 96, textAlign: 'right' }}>{brl(f.valor)}</div>
                     <div style={{ width: 78, textAlign: 'center', fontSize: 12, fontWeight: 700, color: cor }}>{f.status === 'pago' ? 'pago' : vencida ? 'vencida' : 'aberto'}</div>
+                    {/* Recibo colado na baixa: pagou, o comprovante sai daqui. */}
+                    {f.status === 'pago' && (
+                      <BotaoRecibo
+                        path={`/admin/faturas/${f.id}/recibo`}
+                        arquivo={`recibo-${f.id}.pdf`}
+                        onErro={(msg) => showToast({ title: 'Recibo indisponível', msg, kind: 'err' })}
+                        className="ia-btn-outline"
+                        style={{ padding: '0 12px', height: 32, fontSize: 13 }}
+                      />
+                    )}
                     <button onClick={() => baixa(f, f.status !== 'pago')} disabled={busy === f.id} className="ia-btn-outline" style={{ padding: '0 12px', height: 32, fontSize: 13, width: 92 }}>
                       {busy === f.id ? '…' : f.status === 'pago' ? 'Reabrir' : 'Dar baixa'}
                     </button>

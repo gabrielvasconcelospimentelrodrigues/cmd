@@ -3,6 +3,7 @@ import { Building2, Cpu, Plus, CheckCircle2, Clock, X, Users, Trash2, UserPlus, 
 import { apiGet, apiPost, apiDelete, apiPatch } from '../../lib/api';
 import type { Plano, Tenant, TerminalRequest, Fatura, TenantMember, ClinicAccount, EmpresaPlano } from '../../lib/types';
 import { Card, brl } from './parts';
+import BotaoRecibo from '../../components/iacmd/BotaoRecibo';
 import { mascaraCpfCnpj, validaCpfCnpj } from '../../lib/documento';
 
 type ToastData = { title: string; msg: string; kind: 'ok' | 'err' };
@@ -374,8 +375,16 @@ export default function Planos({ contas = [], membros = [], ownerId, ownerName =
                        style={{ padding: '7px 14px', borderRadius: 8, border: 'none', background: vencida ? 'var(--c-warn)' : 'var(--c-blued)', color: '#fff', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                       Pagar
                     </button>
+                  ) : f.status === 'pago' ? (
+                    // Fatura quitada: o comprovante do cliente. Vale para
+                    // mensalidade, implantação e terminal — pagou, tem recibo.
+                    <BotaoRecibo
+                      path={`/minhas-faturas/${f.id}/recibo`}
+                      arquivo={`recibo-${f.id}.pdf`}
+                      onErro={(msg) => showToast({ title: 'Recibo indisponível', msg, kind: 'err' })}
+                    />
                   ) : (
-                    <span style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{f.status === 'pago' ? '—' : f.pago_manual ? 'combinar com a equipe' : 'em emissão'}</span>
+                    <span style={{ color: 'var(--c-ink3)', fontSize: 12 }}>{f.pago_manual ? 'combinar com a equipe' : 'em emissão'}</span>
                   )}
                 </span>
               </div>

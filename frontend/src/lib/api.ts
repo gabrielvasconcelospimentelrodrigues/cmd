@@ -101,6 +101,35 @@ export async function apiDelete(path: string): Promise<void> {
   if (!res.ok) throw await toError(res);
 }
 
+/**
+ * Baixa um arquivo da API (ex.: recibo em PDF).
+ *
+ * Não dá para usar <a href> direto: a rota exige o Bearer token, que só existe
+ * aqui no JS. Então busca o binário, transforma em blob e dispara o download.
+ * O nome vem do Content-Disposition que o backend manda; `nomePadrao` é a
+ * rede de segurança caso o header não chegue (proxy que remove headers).
+ */
+export async function apiDownload(path: string, nomePadrao: string): Promise<void> {
+  const res = await fetch(`${BASE}${path}`, { headers: await authHeader() });
+  if (!res.ok) throw await toError(res);
+
+  const cd = res.headers.get('Content-Disposition') ?? '';
+  const m = cd.match(/filename="?([^";]+)"?/i);
+  const nome = m?.[1] ?? nomePadrao;
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nome;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoga depois do clique: revogar na hora cancela o download em alguns
+  // navegadores, que só leem o blob no tick seguinte.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',

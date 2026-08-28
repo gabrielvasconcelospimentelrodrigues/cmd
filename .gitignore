@@ -26,4 +26,6 @@ Thumbs.db
 # Redis local
 redis/dump.rdb
 redis/*.pdb
+redis/appendonly.aof
+redis/appendonlydir/
 

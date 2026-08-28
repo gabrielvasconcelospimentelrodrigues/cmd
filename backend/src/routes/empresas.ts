@@ -4,6 +4,7 @@ import { registrarLog, ator, atorNome } from '../lib/audit';
 import { getPrecos, precoTerminalNaPosicao } from '../lib/precos';
 import { pixDaCobranca, boletoDaCobranca, pagarComCartao, criarAssinaturaCartao } from '../lib/asaas';
 import { validaCpfCnpj, soDigitos } from '../lib/documento';
+import { montarRecibo, mensagemRecusa, httpRecusa } from '../lib/recibo-service';
 
 /**
  * Monta o resumo do PLANO de um assinante (tenant):
@@ -288,6 +289,22 @@ export async function empresaRoutes(app: FastifyInstance): Promise<void> {
       .from('faturas').select('status').eq('id', id).eq('tenant_id', req.tenant!.id).maybeSingle();
     if (!f) return reply.code(404).send({ error: 'Fatura não encontrada.' });
     return { status: f.status, pago: f.status === 'pago' };
+  });
+
+  /** RECIBO da fatura paga (PDF). O filtro por tenant é a checagem de dono:
+   * o assinante só baixa recibo de fatura dele. Vale para qualquer tipo
+   * (mensalidade, implantação, terminal) — pagou, tem recibo. */
+  app.get('/minhas-faturas/:id/recibo', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+
+    const r = await montarRecibo(id, req.tenant!.id);
+    if (!r.ok) return reply.code(httpRecusa(r.motivo)).send({ error: mensagemRecusa(r.motivo) });
+
+    return reply
+      .header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `attachment; filename="${r.arquivo}"`)
+      .send(r.pdf);
   });
 
   // Empresas do assinante.

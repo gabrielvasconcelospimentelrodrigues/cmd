@@ -10,6 +10,8 @@ import { criarCobrancaAsaas, atualizarCobrancaAsaas, cancelarCobrancaAsaas } fro
 import { liberarTerminal } from '../lib/terminais';
 import { isencaoVigente } from '../lib/acesso';
 import { validaCpfCnpj, soDigitos } from '../lib/documento';
+import { getEmitente, type Emitente } from '../lib/emitente';
+import { montarRecibo, mensagemRecusa, httpRecusa } from '../lib/recibo-service';
 import { decrypt } from '../lib/crypto';
 import type { Database } from '../types/database';
 
@@ -228,6 +230,46 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     await registrarLog({
       categoria: 'financeiro', acao: 'precos.atualizados', nivel: 'info', ator: ator(req),
       descricao: `${atorNome(req)} atualizou a tabela de preços (implantação ${brl(novo.implantacao)}, 1º terminal ${brl(novo.terminais[0] ?? 0)}).`,
+      meta: novo as unknown as Record<string, unknown>,
+    });
+    return novo;
+  });
+
+  // ---- EMITENTE DOS RECIBOS (quem recebeu o pagamento) ---------------------
+  // Impresso em todo recibo, então é dado do negócio e não do código: fica em
+  // configuracoes e o super admin edita pela tela.
+  app.get('/admin/emitente', { preHandler: app.authenticateSuperAdmin }, async () => {
+    return await getEmitente();
+  });
+
+  app.put('/admin/emitente', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
+    const b = (req.body ?? {}) as Partial<Emitente>;
+    const txt = (x: unknown) => String(x ?? '').trim();
+
+    const novo: Emitente = {
+      razao_social: txt(b.razao_social),
+      documento: txt(b.documento),
+      endereco: txt(b.endereco),
+      cidade_uf: txt(b.cidade_uf),
+      telefone: txt(b.telefone),
+      email: txt(b.email),
+      assinante: txt(b.assinante),
+      assinante_cargo: txt(b.assinante_cargo),
+    };
+
+    // Sem razão social o recibo não identifica quem recebeu — é o mínimo.
+    if (!novo.razao_social) return reply.code(400).send({ error: 'Informe a razão social do emitente.' });
+    // Documento é opcional, mas se vier tem de ser CPF/CNPJ válido: número
+    // errado no recibo é pior do que campo em branco.
+    if (novo.documento && !validaCpfCnpj(novo.documento)) {
+      return reply.code(400).send({ error: 'CPF/CNPJ do emitente inválido.' });
+    }
+
+    await (supabaseAdmin as any).from('configuracoes')
+      .upsert({ chave: 'emitente', valor: novo, updated_at: new Date().toISOString() }, { onConflict: 'chave' });
+    await registrarLog({
+      categoria: 'financeiro', acao: 'emitente.atualizado', nivel: 'info', ator: ator(req),
+      descricao: `${atorNome(req)} atualizou os dados do emitente dos recibos (${novo.razao_social}).`,
       meta: novo as unknown as Record<string, unknown>,
     });
     return novo;
@@ -648,6 +690,27 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       meta: { fatura_id: id, valor: data.valor },
     });
     return data;
+  });
+
+  /** RECIBO da fatura paga (PDF) — mesma peça que o assinante baixa no painel.
+   * Serve para reenviar por e-mail/WhatsApp quando o cliente pede a 2ª via. */
+  app.get('/admin/faturas/:id/recibo', { preHandler: app.authenticateSuperAdmin }, async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (Number.isNaN(id)) return reply.code(400).send({ error: 'id inválido.' });
+
+    const r = await montarRecibo(id, null);
+    if (!r.ok) return reply.code(httpRecusa(r.motivo)).send({ error: mensagemRecusa(r.motivo) });
+
+    await registrarLog({
+      tenantId: r.tenantId, categoria: 'financeiro', acao: 'fatura.recibo', nivel: 'info', ator: ator(req),
+      descricao: `${atorNome(req)} emitiu o recibo da fatura "${r.descricao}" (${brl(r.valor)}).`,
+      meta: { fatura_id: id, valor: r.valor },
+    });
+
+    return reply
+      .header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `attachment; filename="${r.arquivo}"`)
+      .send(r.pdf);
   });
 
   /** Editar fatura (corrigir valor, vencimento, descrição) — o super admin
