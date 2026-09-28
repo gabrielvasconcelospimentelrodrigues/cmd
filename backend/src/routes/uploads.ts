@@ -37,6 +37,32 @@ async function acessoAoUpload(
 const MSG_DUPLICADO = 'Cadastro duplicado — mesmo CNS já cadastrado nesta data de atendimento.';
 
 /**
+ * Lê TODAS as linhas de uma consulta, em blocos de 1.000.
+ *
+ * O cliente Supabase devolve no MÁXIMO 1.000 linhas por requisição, em
+ * silêncio — não há erro, a resposta simplesmente vem cortada. Sem isto, a
+ * checagem de duplicados comparava uma fatia da lista contra uma fatia da base
+ * e deixava passar quase tudo: num envio de 2.435 fichas contra 7.810 já
+ * cadastradas, via 1.000 de cada lado e achou 3 duplicatas no lugar de 814.
+ *
+ * A consulta passada PRECISA ter ordenação estável (order por id), senão a
+ * paginação pode repetir ou pular linhas entre os blocos.
+ */
+async function lerTudo<T>(
+  bloco: (de: number, ate: number) => PromiseLike<{ data: T[] | null }>,
+): Promise<T[]> {
+  const TAM = 1000;
+  const tudo: T[] = [];
+  for (let de = 0; ; de += TAM) {
+    const { data } = await bloco(de, de + TAM - 1);
+    const lote = data ?? [];
+    tudo.push(...lote);
+    if (lote.length < TAM) break;
+  }
+  return tudo;
+}
+
+/**
  * Detecta duplicados ANTES de cadastrar: um paciente pendente é duplicado se o
  * mesmo CNS + data de atendimento já está cadastrado (em outra ficha do mesmo
  * assinante) OU se repete dentro da própria lista. Os duplicados vão para
@@ -44,13 +70,15 @@ const MSG_DUPLICADO = 'Cadastro duplicado — mesmo CNS já cadastrado nesta dat
  * quantos foram marcados.
  */
 async function marcarDuplicados(uploadId: number, tenantId: number): Promise<number> {
-  const { data: pend } = await (supabaseAdmin as any)
-    .from('patient_records')
-    .select('id, cns, data_atendimento, modalidade, forcar_cadastro')
-    .eq('upload_id', uploadId)
-    .eq('status', 'pending_registration')
-    .order('id', { ascending: true });
-  const pendentes = (pend ?? []) as { id: number; cns: string | null; data_atendimento: string | null; modalidade: string | null; forcar_cadastro?: boolean }[];
+  const pendentes = await lerTudo<{ id: number; cns: string | null; data_atendimento: string | null; modalidade: string | null; forcar_cadastro?: boolean }>(
+    (de, ate) => (supabaseAdmin as any)
+      .from('patient_records')
+      .select('id, cns, data_atendimento, modalidade, forcar_cadastro')
+      .eq('upload_id', uploadId)
+      .eq('status', 'pending_registration')
+      .order('id', { ascending: true })
+      .range(de, ate),
+  );
   if (pendentes.length === 0) return 0;
 
   // MESMA REGRA do worker (workers/src/lib/repo.ts). Antes esta cópia ignorava a
@@ -64,12 +92,16 @@ async function marcarDuplicados(uploadId: number, tenantId: number): Promise<num
   const caIds = (cas ?? []).map((c) => c.id);
   const contagem = new Map<string, number>();
   if (caIds.length > 0) {
-    const { data: reg } = await (supabaseAdmin as any)
-      .from('patient_records')
-      .select('cns, data_atendimento, modalidade')
-      .in('clinic_account_id', caIds)
-      .in('status', ['registered', 'verified_ok', 'verified_divergent', 'done_manually']);
-    for (const r of (reg ?? []) as { cns: string | null; data_atendimento: string | null; modalidade: string | null }[]) {
+    const reg = await lerTudo<{ cns: string | null; data_atendimento: string | null; modalidade: string | null }>(
+      (de, ate) => (supabaseAdmin as any)
+        .from('patient_records')
+        .select('cns, data_atendimento, modalidade')
+        .in('clinic_account_id', caIds)
+        .in('status', ['registered', 'verified_ok', 'verified_divergent', 'done_manually'])
+        .order('id', { ascending: true })
+        .range(de, ate),
+    );
+    for (const r of reg) {
       if (r.cns && r.data_atendimento) {
         const k = `${r.cns}|${r.data_atendimento}|${mod(r.modalidade)}`;
         contagem.set(k, (contagem.get(k) ?? 0) + 1);

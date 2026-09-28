@@ -124,14 +124,41 @@ export interface PendentePaciente {
   automation_overrides: Record<string, string> | null;
 }
 
+/**
+ * Lê TODAS as linhas de uma consulta, em blocos de 1.000.
+ *
+ * O cliente Supabase devolve no MÁXIMO 1.000 linhas por requisição, em
+ * silêncio — não há erro, a resposta vem cortada. Sem isto, a checagem de
+ * duplicados comparava uma fatia da lista contra uma fatia da base: num envio
+ * de 2.435 fichas contra 7.810 já cadastradas, enxergou 1.000 de cada lado e
+ * marcou 3 duplicatas em vez de 814. O mesmo teto truncava a fila de pendentes.
+ *
+ * A consulta PRECISA ter ordenação estável (order por id), senão a paginação
+ * pode repetir ou pular linhas entre os blocos.
+ */
+async function lerTudo<T>(
+  bloco: (de: number, ate: number) => PromiseLike<{ data: T[] | null }>,
+): Promise<T[]> {
+  const TAM = 1000;
+  const tudo: T[] = [];
+  for (let de = 0; ; de += TAM) {
+    const { data } = await bloco(de, de + TAM - 1);
+    const lote = data ?? [];
+    tudo.push(...lote);
+    if (lote.length < TAM) break;
+  }
+  return tudo;
+}
+
 export async function listarPendentes(uploadId: number): Promise<PendentePaciente[]> {
-  const { data } = await supabaseAdmin
+  const linhas = await lerTudo<unknown>((de, ate) => supabaseAdmin
     .from('patient_records')
     .select('id, nome, cns, data_nascimento, data_atendimento, cid10_codigo, medico_nome, modalidade, automation_overrides, forcar_cadastro')
     .eq('upload_id', uploadId)
     .eq('status', 'pending_registration')
-    .order('id', { ascending: true });
-  return (data ?? []) as unknown as PendentePaciente[];
+    .order('id', { ascending: true })
+    .range(de, ate));
+  return linhas as unknown as PendentePaciente[];
 }
 
 /** Deduplicação: já existe cadastro do MESMO CNS + data de atendimento + MESMA
@@ -167,13 +194,15 @@ export async function marcarDuplicados(uploadId: number, tenantId: number): Prom
   // duplicidade; só a MESMA data conta. A modalidade na chave também impede
   // catarata colidir com OCI.
   const mod = (m: string | null | undefined) => (m === 'catarata' ? 'catarata' : 'oci');
-  const { data: pend } = await supabaseAdmin
-    .from('patient_records')
-    .select('id, cns, data_atendimento, modalidade, forcar_cadastro')
-    .eq('upload_id', uploadId)
-    .eq('status', 'pending_registration')
-    .order('id', { ascending: true });
-  const pendentes = (pend ?? []) as { id: number; cns: string | null; data_atendimento: string | null; modalidade: string | null; forcar_cadastro?: boolean }[];
+  const pendentes = await lerTudo<{ id: number; cns: string | null; data_atendimento: string | null; modalidade: string | null; forcar_cadastro?: boolean }>(
+    (de, ate) => supabaseAdmin
+      .from('patient_records')
+      .select('id, cns, data_atendimento, modalidade, forcar_cadastro')
+      .eq('upload_id', uploadId)
+      .eq('status', 'pending_registration')
+      .order('id', { ascending: true })
+      .range(de, ate) as any,
+  );
   if (pendentes.length === 0) return 0;
 
   // Limite de cadastros por CNS+data+modalidade. CATARATA = 2: os dois olhos
@@ -186,12 +215,16 @@ export async function marcarDuplicados(uploadId: number, tenantId: number): Prom
   // Contagem de JÁ cadastrados por chave (não mais um Set: agora importa QUANTOS).
   const contagem = new Map<string, number>();
   if (caIds.length > 0) {
-    const { data: reg } = await supabaseAdmin
-      .from('patient_records')
-      .select('cns, data_atendimento, modalidade')
-      .in('clinic_account_id', caIds)
-      .in('status', ['registered', 'verified_ok', 'verified_divergent', 'done_manually']);
-    for (const r of (reg ?? []) as { cns: string | null; data_atendimento: string | null; modalidade: string | null }[]) {
+    const reg = await lerTudo<{ cns: string | null; data_atendimento: string | null; modalidade: string | null }>(
+      (de, ate) => supabaseAdmin
+        .from('patient_records')
+        .select('cns, data_atendimento, modalidade')
+        .in('clinic_account_id', caIds)
+        .in('status', ['registered', 'verified_ok', 'verified_divergent', 'done_manually'])
+        .order('id', { ascending: true })
+        .range(de, ate) as any,
+    );
+    for (const r of reg) {
       if (r.cns && r.data_atendimento) {
         const k = `${r.cns}|${r.data_atendimento}|${mod(r.modalidade)}`;
         contagem.set(k, (contagem.get(k) ?? 0) + 1);
