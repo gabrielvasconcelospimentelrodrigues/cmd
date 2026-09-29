@@ -781,6 +781,8 @@ function MapeamentoModal({ colunas, obrigatorios, mapa, setMapa, busy, onCancel,
 function Enviar({ empresas, uploads, contas = [], isMember, filtroMembro = '', filtroEmpresa = '', ativo = true, bloqueado = false, onBloqueado, onChange, showToast }: { empresas: any[]; uploads: Upload[]; contas?: ClinicAccount[]; isMember: boolean; filtroMembro?: string; filtroEmpresa?: string; ativo?: boolean; bloqueado?: boolean; onBloqueado?: () => void; onChange: () => Promise<void>; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void }) {
   const [empresaId, setEmpresaId] = useState<number | ''>('');
   const [nomeLista, setNomeLista] = useState('');
+  const [cidadeLista, setCidadeLista] = useState('');
+  const [cidadesUsadas, setCidadesUsadas] = useState<string[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [fileKey, setFileKey] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -801,6 +803,8 @@ function Enviar({ empresas, uploads, contas = [], isMember, filtroMembro = '', f
     if (filtroMembro) q.push(`member_user_id=${filtroMembro}`);
     if (empresas.length > 1 && filtroEmpresa) q.push(`empresa_id=${filtroEmpresa}`);
     apiGet<FichasAnalitico>(`/fichas/analitico?${q.join('&')}`).then(setAnalitico).catch(() => setAnalitico(null));
+    // Cidades já usadas — só sugestão para o campo, então falha é silenciosa.
+    apiGet<string[]>('/relatorios/cidades').then(setCidadesUsadas).catch(() => setCidadesUsadas([]));
     // totalEnviado muda quando a automação cadastra → atualiza os números.
   }, [ativo, filtroMembro, filtroEmpresa, empresas.length, totalEnviado]);
 
@@ -833,10 +837,12 @@ function Enviar({ empresas, uploads, contas = [], isMember, filtroMembro = '', f
       const form = new FormData();
       form.append('empresa_id', String(empresaId));
       form.append('name', nomeLista.trim());
+      // Município da lista — vira o filtro por cidade nos Relatórios.
+      form.append('cidade', cidadeLista.trim());
       form.append('file', file!);
       form.append('mapeamento_campos', JSON.stringify(mapa));
       const upload = await apiUpload<Upload>('/uploads', form);
-      setMapPreview(null); setMapa({}); setFile(null); setFileKey((k) => k + 1); setNomeLista('');
+      setMapPreview(null); setMapa({}); setFile(null); setFileKey((k) => k + 1); setNomeLista(''); setCidadeLista('');
       await onChange();
       if (isMember) setSelectTerminalForUpload(upload);
       else showToast({ title: 'Enviado para a IA', msg: 'As fichas entraram na fila de extração.', kind: 'ok' });
@@ -870,6 +876,17 @@ function Enviar({ empresas, uploads, contas = [], isMember, filtroMembro = '', f
           <div style={{ flex: 1, minWidth: 200 }}>
             <label className="ia-label">Nome da lista</label>
             <input type="text" value={nomeLista} onChange={(e) => setNomeLista(e.target.value)} className="ia-input" placeholder="Ex: Fichas Oftalmo Junho" />
+          </div>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <label className="ia-label">Cidade</label>
+            {/* datalist: sugere as cidades já usadas sem impedir digitar uma nova —
+                assim a grafia se mantém constante e o filtro do relatório não
+                acaba com "Recife" e "RECIFE" como se fossem lugares diferentes. */}
+            <input type="text" list="cidades-usadas" value={cidadeLista}
+              onChange={(e) => setCidadeLista(e.target.value)} className="ia-input" placeholder="Ex: Recife" />
+            <datalist id="cidades-usadas">
+              {cidadesUsadas.map((c) => <option key={c} value={c} />)}
+            </datalist>
           </div>
           <div style={{ flex: 1, minWidth: 200 }}>
             <label className="ia-label">Empresa vinculada</label>
