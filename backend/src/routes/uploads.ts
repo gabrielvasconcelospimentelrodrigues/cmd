@@ -177,6 +177,7 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     let clinicAccountId: number | null = null;
     let empresaId: number | null = null;
     let name = '';
+    let cidade = '';
     let origem: string | null = null;
     let mapeamento: Record<string, string> = {};
 
@@ -193,6 +194,9 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
         if (!Number.isNaN(val)) empresaId = val;
       } else if (part.fieldname === 'name') {
         name = String(part.value);
+      } else if (part.fieldname === 'cidade') {
+        // Município da lista — alimenta o filtro por cidade dos relatórios.
+        cidade = String(part.value).trim();
       } else if (part.fieldname === 'origem') {
         origem = String(part.value);
       } else if (part.fieldname === 'mapeamento_campos') {
@@ -270,6 +274,7 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
       status: 'extracting',
       short_code: shortCode,
       mapeamento_campos: mapeamento,
+      cidade: cidade || null,
       uploaded_by: req.authUser!.id,
       ...(origemFinal ? { origem: origemFinal } : {}),
     };

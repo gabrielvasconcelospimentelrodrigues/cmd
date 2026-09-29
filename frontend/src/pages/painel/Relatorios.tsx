@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { CalendarRange, Stethoscope, Layers, Clock3, RotateCcw, AlertTriangle, SlidersHorizontal, ChevronDown, ChevronUp } from 'lucide-react';
+import { CalendarRange, Stethoscope, Layers, Clock3, RotateCcw, AlertTriangle, SlidersHorizontal, ChevronDown, ChevronUp, ListChecks, MapPin, FileText } from 'lucide-react';
 import { apiGet, type ApiError } from '../../lib/api';
 import { Card, brl, fmtMilhar } from './parts';
+import ListaFichas from './RelatoriosLista';
 
 /* ============================================================================
    RELATÓRIO DAS FICHAS IMPORTADAS
@@ -14,6 +15,14 @@ import { Card, brl, fmtMilhar } from './parts';
    cor — por isso toda barra leva rótulo direto, há legenda e existe a tabela
    por médico com os mesmos números.
    ========================================================================== */
+
+export interface FichaListada {
+  id: number; nome: string; cns: string;
+  data_nascimento: string | null; data_atendimento: string | null; idade: number | null;
+  modalidade: string; cid10_codigo: string; medico_nome: string;
+  status: string; situacao: string; error_message: string | null;
+  registered_at: string | null; lista: string; cidade: string | null; upload_id: number;
+}
 
 const COR_OCI = 'var(--c-blue)';
 const COR_CIR = 'var(--c-cyan)';
@@ -29,9 +38,16 @@ interface Relatorio {
     total: number; oci: number; cirurgia: number;
     faixa_0_8: number; faixa_9_mais: number; sem_idade: number;
     registradas: number; pendentes: number; revisao: number; erros: number;
-    medicos: number; listas: number;
+    medicos: number; listas: number; cidades: number;
+    oci_0_8: number; oci_9_mais: number;
     primeira: string | null; ultima: string | null; sem_data: number;
   };
+  procedimentos: {
+    total: number;
+    linhas: { codigo: string; descricao: string; oci: number; cirurgia: number; total: number }[];
+    por_grupo: { grupo: string; fichas: number; por_ficha: number; total: number }[];
+  };
+  por_cidade: { cidade: string; total: number; oci: number; cirurgia: number; registradas: number }[];
   economia: { execucoes: number; minutos: number; horas: number; custo_minuto: number; valor: number; funcionarios_equivalentes: number };
   por_medico: { medico: string; total: number; oci: number; cirurgia: number; faixa_0_8: number; faixa_9_mais: number; registradas: number }[];
   por_mes: { mes: string; total: number; oci: number; cirurgia: number; faixa_0_8: number; faixa_9_mais: number }[];
@@ -130,6 +146,8 @@ export default function Relatorios({
   const [faixa, setFaixa] = useState<Faixa>('todas');
   const [situacao, setSituacao] = useState<Situacao>('todas');
   const [medico, setMedico] = useState('');
+  const [cidade, setCidade] = useState('');
+  const [cidades, setCidades] = useState<string[]>([]);
   const [conta, setConta] = useState('');
   const [empresa, setEmpresa] = useState('');
 
@@ -148,7 +166,7 @@ export default function Relatorios({
   // saber que há recorte ativo sem precisar abrir o painel.
   const ativos = [
     modalidade !== 'todas', faixa !== 'todas', situacao !== 'todas',
-    !!medico, !!conta, !!empresa, base !== 'atendimento',
+    !!medico, !!cidade, !!conta, !!empresa, base !== 'atendimento',
   ].filter(Boolean).length;
 
   const query = useMemo(() => {
@@ -159,6 +177,7 @@ export default function Relatorios({
     if (faixa !== 'todas') q.push(`faixa=${faixa}`);
     if (situacao !== 'todas') q.push(`situacao=${situacao}`);
     if (medico) q.push(`medico=${encodeURIComponent(medico)}`);
+    if (cidade) q.push(`cidade=${encodeURIComponent(cidade)}`);
     if (!isMember && conta) q.push(`clinic_account_id=${conta}`);
     if (filtroMembro) q.push(`member_user_id=${filtroMembro}`);
     // Uma empresa só na querystring: o filtro global do painel manda, e o
@@ -167,7 +186,7 @@ export default function Relatorios({
     const empresaAtiva = filtroEmpresa || (isMember ? '' : empresa);
     if (empresaAtiva) q.push(`empresa_id=${empresaAtiva}`);
     return q.join('&');
-  }, [base, inicio, fim, modalidade, faixa, situacao, medico, conta, empresa, isMember, filtroMembro, filtroEmpresa]);
+  }, [base, inicio, fim, modalidade, faixa, situacao, medico, cidade, conta, empresa, isMember, filtroMembro, filtroEmpresa]);
 
   /**
    * Numera as buscas para descartar resposta atrasada.
@@ -208,13 +227,14 @@ export default function Relatorios({
   useEffect(() => {
     if (!ativo || medicos.length) return;
     apiGet<string[]>('/relatorios/medicos').then(setMedicos).catch(() => setMedicos([]));
+    apiGet<string[]>('/relatorios/cidades').then(setCidades).catch(() => setCidades([]));
   }, [ativo, medicos.length]);
 
   const limpar = () => {
     const p = atalho('noventa');
     setInicio(p.inicio); setFim(p.fim); setBase('atendimento');
     setModalidade('todas'); setFaixa('todas'); setSituacao('todas');
-    setMedico(''); setConta(''); setEmpresa('');
+    setMedico(''); setCidade(''); setConta(''); setEmpresa('');
   };
 
   const r = dados?.resumo;
@@ -324,6 +344,14 @@ export default function Relatorios({
             <select value={medico} onChange={(e) => setMedico(e.target.value)} style={inp}>
               <option value="">Todos</option>
               {medicos.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="ia-label">Cidade</label>
+            <select value={cidade} onChange={(e) => setCidade(e.target.value)} style={inp}>
+              <option value="">Todas</option>
+              {cidades.map((c) => <option key={c} value={c}>{c}</option>)}
+              <option value="sem">— Sem cidade informada —</option>
             </select>
           </div>
           <div>
@@ -445,6 +473,31 @@ export default function Relatorios({
                 {estreito ? <ListaMedicos dados={dados.por_medico} /> : <TabelaMedicos dados={dados.por_medico} />}
               </>
             )}
+          </Card>
+
+          {/* ---- ETAPAS: procedimentos gerados ---- */}
+          <Card style={{ padding: 18 }}>
+            <Titulo icone={<ListChecks size={16} />} texto="Cirurgia e OCI por etapas (procedimentos)" />
+            <Procedimentos p={dados.procedimentos} estreito={estreito} />
+          </Card>
+
+          {/* ---- POR CIDADE ---- */}
+          <Card style={{ padding: 18 }}>
+            <Titulo icone={<MapPin size={16} />} texto="Por cidade" />
+            <Legenda />
+            <PorCidade dados={dados.por_cidade} />
+            {r.cidades === 0 && (
+              <p style={{ margin: '12px 0 0', color: 'var(--c-ink3)', fontSize: 12, lineHeight: 1.5 }}>
+                Nenhuma lista deste recorte tem cidade informada. A cidade passa a ser preenchida
+                na importação; as listas antigas ficam como "Sem cidade informada".
+              </p>
+            )}
+          </Card>
+
+          {/* ---- LISTAGEM DAS FICHAS ---- */}
+          <Card style={{ padding: 18 }}>
+            <Titulo icone={<FileText size={16} />} texto="Fichas do recorte" />
+            <ListaFichas query={query} estreito={estreito} onErro={setErro} />
           </Card>
 
           {/* ---- POR LISTA IMPORTADA ---- */}
@@ -726,6 +779,92 @@ function TabelaListas({ dados }: { dados: Relatorio['por_lista'] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/* ============================================================================
+   ETAPAS — os procedimentos que cada ficha gera no SUS.
+
+   O sistema não guarda um registro por procedimento: ele os deriva da
+   modalidade e da idade no momento do cadastro. O backend reproduz a MESMA
+   regra para contar, então estes números batem com o que foi (ou será) lançado
+   no CMD — OCI 9+ gera 6 procedimentos, OCI 0-8 gera 5, cirurgia gera 1.
+   ========================================================================== */
+export function Procedimentos({ p, estreito }: { p: Relatorio['procedimentos']; estreito: boolean }) {
+  if (p.total === 0) return <Vazio />;
+  const max = Math.max(...p.linhas.map((l) => l.total), 1);
+  return (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: estreito ? '1fr' : 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10, marginBottom: 16 }}>
+        {p.por_grupo.map((g) => (
+          <div key={g.grupo} style={{ padding: 12, borderRadius: 10, background: 'var(--c-surface2)' }}>
+            <div style={{ color: 'var(--c-ink3)', fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>{g.grupo}</div>
+            <div style={{ color: 'var(--c-ink)', fontSize: 20, fontWeight: 800, marginTop: 4 }}>{fmtMilhar(g.total)}</div>
+            <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 2 }}>
+              {fmtMilhar(g.fichas)} ficha(s) × {g.por_ficha} procedimento(s)
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Legenda />
+      <div style={{ display: 'grid', gap: 10 }}>
+        {p.linhas.map((l) => {
+          const largura = (l.total / max) * 100;
+          const pOci = l.total > 0 ? (l.oci / l.total) * 100 : 0;
+          return (
+            <div key={l.codigo}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 4, alignItems: 'baseline' }}>
+                <span style={{ color: 'var(--c-ink2)', fontSize: 12.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <b className="ia-mono" style={{ color: 'var(--c-ink3)' }}>{l.codigo}</b> · {l.descricao}
+                </span>
+                <b style={{ color: 'var(--c-ink)', fontSize: 13, flex: 'none' }}>{fmtMilhar(l.total)}</b>
+              </div>
+              <div style={{ height: 12, background: 'var(--c-surface2)', borderRadius: 4 }}>
+                <div title={`OCI ${fmtMilhar(l.oci)} · Cirurgia ${fmtMilhar(l.cirurgia)}`}
+                  style={{ width: `${largura}%`, height: '100%', display: 'flex', gap: 2, borderRadius: 4, overflow: 'hidden' }}>
+                  {l.oci > 0 && <div style={{ width: `${pOci}%`, background: COR_OCI }} />}
+                  {l.cirurgia > 0 && <div style={{ width: `${100 - pOci}%`, background: COR_CIR }} />}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p style={{ margin: '14px 0 0', color: 'var(--c-ink3)', fontSize: 12 }}>
+        Total de <b style={{ color: 'var(--c-ink2)' }}>{fmtMilhar(p.total)}</b> procedimentos no recorte.
+        Derivados da regra do robô (modalidade + idade), não de lançamento manual.
+      </p>
+    </>
+  );
+}
+
+/** Quantitativo por cidade — a cidade vem da lista, informada na importação. */
+export function PorCidade({ dados }: { dados: Relatorio['por_cidade'] }) {
+  if (dados.length === 0) return <Vazio />;
+  const max = Math.max(...dados.map((d) => d.total), 1);
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      {dados.map((d) => {
+        const pOci = d.total > 0 ? (d.oci / d.total) * 100 : 0;
+        return (
+          <div key={d.cidade}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 4 }}>
+              <span style={{ color: 'var(--c-ink2)', fontSize: 13, fontWeight: 600 }}>{d.cidade}</span>
+              <span style={{ color: 'var(--c-ink3)', fontSize: 12.5 }}>
+                OCI <b style={{ color: 'var(--c-ink)' }}>{fmtMilhar(d.oci)}</b> · Cirurgia <b style={{ color: 'var(--c-ink)' }}>{fmtMilhar(d.cirurgia)}</b> · Total <b style={{ color: 'var(--c-ink)' }}>{fmtMilhar(d.total)}</b>
+              </span>
+            </div>
+            <div style={{ height: 14, background: 'var(--c-surface2)', borderRadius: 4 }}>
+              <div style={{ width: `${(d.total / max) * 100}%`, height: '100%', display: 'flex', gap: 2, borderRadius: 4, overflow: 'hidden' }}>
+                {d.oci > 0 && <div style={{ width: `${pOci}%`, background: COR_OCI }} />}
+                {d.cirurgia > 0 && <div style={{ width: `${100 - pOci}%`, background: COR_CIR }} />}
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

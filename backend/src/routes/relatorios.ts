@@ -1,6 +1,7 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getPool } from '../lib/db';
 import { supabaseAdmin } from '../lib/supabase';
+import { PROC_CATARATA, PROC_OCI_0_8, PROC_OCI_9_MAIS } from '../lib/procedimentos';
 
 /**
  * RELATÓRIO ANALÍTICO DAS FICHAS IMPORTADAS.
@@ -58,16 +59,36 @@ function dataOuNull(v: unknown): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
 }
 
-export async function relatoriosRoutes(app: FastifyInstance): Promise<void> {
-  /**
-   * Relatório das fichas importadas.
-   *
-   * Filtros: período (com a data-base escolhida), modalidade (OCI x cirurgia),
-   * faixa etária (0-8 x 9+), médico, situação, empresa e terminal.
-   */
-  app.get('/relatorios/fichas', { preHandler: [app.authenticate] }, async (req, reply) => {
-    const tid = req.tenant!.id;
-    const q = req.query as Record<string, string | undefined>;
+
+/** Situação da ficha em português — usada no CSV e na listagem. */
+export function rotuloSituacao(status: string): string {
+  if (['registered', 'verified_ok', 'verified_divergent', 'done_manually'].includes(status)) return 'Cadastrada';
+  if (status === 'pending_registration') return 'Aguardando cadastro';
+  if (status === 'needs_review') return 'Em pendência';
+  if (status === 'error') return 'Com erro';
+  return status;
+}
+
+export interface Recorte {
+  base: string; colData: string;
+  inicio: string | null; fim: string | null;
+  filtros: string; params: unknown[];
+}
+
+/**
+ * Monta o WHERE do recorte a partir do querystring.
+ *
+ * Fica fora das rotas porque relatório, listagem e CSV precisam do MESMO
+ * filtro — se cada uma montasse o seu, o CSV cedo ou tarde exportaria um
+ * conjunto diferente do que a tela mostra, que é o pior tipo de divergência
+ * num relatório.
+ *
+ * Devolve null quando o recorte não alcança terminal nenhum (quem chama
+ * responde o vazio no formato da sua própria rota).
+ */
+async function montarRecorte(req: FastifyRequest): Promise<Recorte | null> {
+  const tid = req.tenant!.id;
+  const q = req.query as Record<string, string | undefined>;
 
     const base: string = BASE_DATA[q.base ?? 'atendimento'] ? (q.base ?? 'atendimento') : 'atendimento';
     const colData = BASE_DATA[base]!;
@@ -95,6 +116,23 @@ export async function relatoriosRoutes(app: FastifyInstance): Promise<void> {
       params.push(q.medico);
     }
 
+    // Cidade fica no UPLOAD (a lista é de um mutirão/município). 'sem' isola as
+    // listas antigas, importadas antes de o campo existir.
+    if (q.cidade === 'sem') {
+      filtros += ' AND u.cidade IS NULL';
+    } else if (q.cidade) {
+      filtros += ` AND u.cidade = $${params.length + 1}`;
+      params.push(q.cidade);
+    }
+
+    if (q.upload_id) {
+      const uid = Number(q.upload_id);
+      if (Number.isFinite(uid)) {
+        filtros += ` AND u.id = $${params.length + 1}`;
+        params.push(uid);
+      }
+    }
+
     // Escopo: membro só enxerga o que é dele; dono pode recortar por empresa
     // ou por terminal. Mesma semântica das outras telas.
     const activeMemberId = req.member ? req.member.user_id : (q.member_user_id || null);
@@ -110,11 +148,125 @@ export async function relatoriosRoutes(app: FastifyInstance): Promise<void> {
     } else if (!req.member && q.clinic_account_id) {
       const caIds = await resolverCaIds(req, tid, q.clinic_account_id);
       if (caIds) {
-        if (caIds.length === 0) return reply.code(200).send(vazio(base, inicio, fim));
+        if (caIds.length === 0) return null;
         filtros += ` AND pr.clinic_account_id = ANY($${params.length + 1}::bigint[])`;
         params.push(caIds);
       }
     }
+
+
+  return { base, colData, inicio, fim, filtros, params };
+}
+
+export interface FichaListada {
+  id: number;
+  nome: string;
+  cns: string;
+  data_nascimento: string | null;
+  data_atendimento: string | null;
+  idade: number | null;
+  modalidade: string;
+  cid10_codigo: string;
+  medico_nome: string;
+  status: string;
+  situacao: string;
+  error_message: string | null;
+  registered_at: string | null;
+  lista: string;
+  cidade: string | null;
+  upload_id: number;
+}
+
+/**
+ * Busca as fichas do recorte.
+ *
+ * `tudo` = true traz o conjunto inteiro (usado pelo CSV: exportar só a página
+ * visível seria uma armadilha — o arquivo pareceria completo e não estaria).
+ * O padrão é paginado, para a listagem da tela não carregar milhares de linhas.
+ */
+async function consultarFichas(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  tudo = false,
+): Promise<{ fichas: FichaListada[]; total: number; pagina: number; por_pagina: number } | null> {
+  const recorte = await montarRecorte(req);
+  if (!recorte) {
+    if (tudo) { await reply.code(200).send('﻿'); return null; }
+    await reply.code(200).send({ fichas: [], total: 0, pagina: 1, por_pagina: 0 });
+    return null;
+  }
+  const { colData, filtros, params } = recorte;
+  const q = req.query as Record<string, string | undefined>;
+
+  const porPagina = Math.min(Math.max(Number(q.por_pagina) || 50, 1), 200);
+  const pagina = Math.max(Number(q.pagina) || 1, 1);
+
+  const DE = `
+    FROM patient_records pr
+    JOIN uploads u ON u.id = pr.upload_id AND u.deleted_at IS NULL
+    LEFT JOIN clinic_accounts uca ON uca.id = u.clinic_account_id
+    LEFT JOIN empresas ue ON ue.id = u.empresa_id
+    LEFT JOIN clinic_accounts ca ON ca.id = pr.clinic_account_id
+    WHERE COALESCE(uca.tenant_id, ue.tenant_id) = $1
+      AND ($2::date IS NULL OR ${colData} >= $2::date)
+      AND ($3::date IS NULL OR ${colData} <= $3::date)
+      ${filtros}`;
+
+  const { rows: cont } = await getPool().query(`SELECT count(*)::int AS n ${DE}`, params);
+  const total = num(cont[0]?.n);
+
+  // Teto de segurança no CSV: acima disso o arquivo deixa de ser útil e a
+  // consulta passa a pesar no banco de produção.
+  const limite = tudo ? Math.min(total, 50_000) : porPagina;
+  const salto = tudo ? 0 : (pagina - 1) * porPagina;
+
+  const { rows } = await getPool().query(
+    `SELECT pr.id, pr.nome, pr.cns, pr.data_nascimento::text AS data_nascimento,
+            pr.data_atendimento::text AS data_atendimento, pr.idade_no_atendimento AS idade,
+            pr.modalidade, pr.cid10_codigo, pr.medico_nome, pr.status::text AS status,
+            NULLIF(pr.error_message, '') AS error_message,
+            to_char(pr.registered_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS registered_at,
+            COALESCE(NULLIF(btrim(u.name), ''), u.original_filename) AS lista,
+            u.cidade, u.id AS upload_id
+     ${DE}
+     ORDER BY ${colData} DESC NULLS LAST, pr.id DESC
+     LIMIT ${limite} OFFSET ${salto}`,
+    params,
+  );
+
+  const fichas: FichaListada[] = rows.map((f) => ({
+    id: num(f.id),
+    nome: String(f.nome ?? ''),
+    cns: String(f.cns ?? ''),
+    data_nascimento: f.data_nascimento ?? null,
+    data_atendimento: f.data_atendimento ?? null,
+    idade: f.idade == null ? null : num(f.idade),
+    modalidade: String(f.modalidade ?? 'oci'),
+    cid10_codigo: String(f.cid10_codigo ?? ''),
+    medico_nome: String(f.medico_nome ?? ''),
+    status: String(f.status),
+    situacao: rotuloSituacao(String(f.status)),
+    error_message: f.error_message ?? null,
+    registered_at: f.registered_at ?? null,
+    lista: String(f.lista ?? ''),
+    cidade: f.cidade ?? null,
+    upload_id: num(f.upload_id),
+  }));
+
+  return { fichas, total, pagina, por_pagina: porPagina };
+}
+
+export async function relatoriosRoutes(app: FastifyInstance): Promise<void> {
+  /**
+   * Relatório das fichas importadas.
+   *
+   * Filtros: período (com a data-base escolhida), modalidade (OCI x cirurgia),
+   * faixa etária (0-8 x 9+), médico, situação, empresa e terminal.
+   */
+  app.get('/relatorios/fichas', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const recorte = await montarRecorte(req);
+    if (!recorte) return reply.code(200).send(vazio('atendimento', null, null));
+    const { base, colData, inicio, fim, filtros, params } = recorte;
 
     /**
      * O tenant da ficha vem do upload (clinic_account OU empresa), não de
@@ -132,6 +284,7 @@ export async function relatoriosRoutes(app: FastifyInstance): Promise<void> {
           ${colData} AS data_ref,
           u.id AS upload_id,
           COALESCE(NULLIF(btrim(u.name), ''), u.original_filename) AS lista,
+          u.cidade,
           u.uploaded_at
         FROM patient_records pr
         JOIN uploads u ON u.id = pr.upload_id AND u.deleted_at IS NULL
@@ -173,8 +326,11 @@ export async function relatoriosRoutes(app: FastifyInstance): Promise<void> {
             count(*) FILTER (WHERE status = 'pending_registration') AS pendentes,
             count(*) FILTER (WHERE status = 'needs_review') AS revisao,
             count(*) FILTER (WHERE status = 'error') AS erros,
+            count(*) FILTER (WHERE modalidade IS DISTINCT FROM 'catarata' AND idade <= 8) AS oci_0_8,
+            count(*) FILTER (WHERE modalidade IS DISTINCT FROM 'catarata' AND (idade >= 9 OR idade IS NULL)) AS oci_9_mais,
             count(DISTINCT medico) AS medicos,
             count(DISTINCT upload_id) AS listas,
+            count(DISTINCT cidade) AS cidades,
             min(data_ref)::text AS primeira,
             max(data_ref)::text AS ultima,
             count(*) FILTER (WHERE data_ref IS NULL) AS sem_data
@@ -203,6 +359,16 @@ export async function relatoriosRoutes(app: FastifyInstance): Promise<void> {
             count(*) FILTER (WHERE idade >= 9) AS faixa_9_mais
           FROM base WHERE data_ref IS NOT NULL GROUP BY 1 ORDER BY 1
         ) r) AS por_mes,
+
+        (SELECT COALESCE(json_agg(r), '[]'::json) FROM (
+          SELECT
+            COALESCE(cidade, 'Sem cidade informada') AS cidade,
+            count(*) AS total,
+            count(*) FILTER (WHERE modalidade IS DISTINCT FROM 'catarata') AS oci,
+            count(*) FILTER (WHERE modalidade = 'catarata') AS cirurgia,
+            count(*) FILTER (WHERE status IN ${STATUS_OK}) AS registradas
+          FROM base GROUP BY 1 ORDER BY 2 DESC
+        ) r) AS por_cidade,
 
         (SELECT COALESCE(json_agg(r), '[]'::json) FROM (
           SELECT
@@ -244,8 +410,11 @@ export async function relatoriosRoutes(app: FastifyInstance): Promise<void> {
         pendentes: num(resumo.pendentes),
         revisao: num(resumo.revisao),
         erros: num(resumo.erros),
+        oci_0_8: num(resumo.oci_0_8),
+        oci_9_mais: num(resumo.oci_9_mais),
         medicos: num(resumo.medicos),
         listas: num(resumo.listas),
+        cidades: num(resumo.cidades),
         primeira: resumo.primeira ?? null,
         ultima: resumo.ultima ?? null,
         sem_data: num(resumo.sem_data),
@@ -275,6 +444,46 @@ export async function relatoriosRoutes(app: FastifyInstance): Promise<void> {
         faixa_0_8: num(m.faixa_0_8),
         faixa_9_mais: num(m.faixa_9_mais),
       })),
+      // ETAPAS: o sistema não grava um registro por procedimento — ele os
+      // deriva da modalidade e da idade ao cadastrar. Como a regra é
+      // determinística, reproduzi-la aqui chega ao mesmo total sem tabela nova.
+      procedimentos: (() => {
+        const oci08 = num(resumo.oci_0_8);
+        const oci9 = num(resumo.oci_9_mais);
+        const cat = num(resumo.cirurgia);
+        const soma = new Map<string, { codigo: string; descricao: string; oci: number; cirurgia: number }>();
+        const juntar = (procs: { codigo: string; descricao: string }[], qtd: number, ehCirurgia = false) => {
+          for (const proc of procs) {
+            const at = soma.get(proc.codigo) ?? { codigo: proc.codigo, descricao: proc.descricao, oci: 0, cirurgia: 0 };
+            if (ehCirurgia) at.cirurgia += qtd; else at.oci += qtd;
+            soma.set(proc.codigo, at);
+          }
+        };
+        juntar(PROC_OCI_0_8, oci08);
+        juntar(PROC_OCI_9_MAIS, oci9);
+        juntar([PROC_CATARATA], cat, true);
+        const linhas = [...soma.values()]
+          .map((x) => ({ ...x, total: x.oci + x.cirurgia }))
+          .filter((x) => x.total > 0)
+          .sort((a, b) => b.total - a.total);
+        return {
+          linhas,
+          total: linhas.reduce((acc, x) => acc + x.total, 0),
+          // Quantos procedimentos cada grupo gera, para conferência na tela.
+          por_grupo: [
+            { grupo: 'OCI 0 a 8 anos', fichas: oci08, por_ficha: PROC_OCI_0_8.length, total: oci08 * PROC_OCI_0_8.length },
+            { grupo: 'OCI 9 anos ou mais', fichas: oci9, por_ficha: PROC_OCI_9_MAIS.length, total: oci9 * PROC_OCI_9_MAIS.length },
+            { grupo: 'Cirurgia (catarata)', fichas: cat, por_ficha: 1, total: cat },
+          ].filter((g) => g.fichas > 0),
+        };
+      })(),
+      por_cidade: ((r.por_cidade ?? []) as Record<string, unknown>[]).map((x) => ({
+        cidade: String(x.cidade),
+        total: num(x.total),
+        oci: num(x.oci),
+        cirurgia: num(x.cirurgia),
+        registradas: num(x.registradas),
+      })),
       por_lista: ((r.por_lista ?? []) as Record<string, unknown>[]).map((l) => ({
         upload_id: num(l.upload_id),
         lista: String(l.lista ?? ''),
@@ -284,6 +493,59 @@ export async function relatoriosRoutes(app: FastifyInstance): Promise<void> {
         cirurgia: num(l.cirurgia),
       })),
     };
+  });
+
+  /**
+   * LISTAGEM das fichas do recorte, paginada.
+   *
+   * Separada do relatório de propósito: o relatório agrega milhares de linhas
+   * e cabe numa resposta; a listagem devolve as fichas em si e precisa de
+   * página, senão um recorte grande derruba a tela.
+   */
+  app.get('/relatorios/fichas/lista', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const r = await consultarFichas(req, reply);
+    if (!r) return; // a própria consultarFichas já respondeu
+    return r;
+  });
+
+  /** As mesmas fichas do recorte, em CSV — o arquivo traz TUDO, não só a página. */
+  app.get('/relatorios/fichas/csv', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const r = await consultarFichas(req, reply, true);
+    if (!r) return;
+
+    const cab = ['Nome', 'CNS', 'Nascimento', 'Atendimento', 'Idade', 'Modalidade', 'CID', 'Profissional', 'Situação', 'Lista', 'Cidade', 'Cadastrada em', 'Observação'];
+    const esc = (v: unknown) => {
+      const s = v == null ? '' : String(v);
+      return /[";\n,]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const linhas = r.fichas.map((f) => [
+      f.nome, f.cns, f.data_nascimento ?? '', f.data_atendimento ?? '', f.idade ?? '',
+      f.modalidade === 'catarata' ? 'CIRURGIA' : 'OCI', f.cid10_codigo, f.medico_nome,
+      rotuloSituacao(f.status), f.lista, f.cidade ?? '', f.registered_at ?? '', f.error_message ?? '',
+    ].map(esc).join(','));
+
+    // BOM: sem ele o Excel abre os acentos errados (é o leitor mais usado aqui).
+    const csv = '﻿' + [cab.join(','), ...linhas].join('\r\n') + '\r\n';
+    const hoje = new Date().toISOString().slice(0, 10);
+    return reply
+      .header('Content-Type', 'text/csv; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="fichas-${hoje}.csv"`)
+      .send(csv);
+  });
+
+  /** Cidades que aparecem nas listas do assinante — alimenta o filtro. */
+  app.get('/relatorios/cidades', { preHandler: [app.authenticate] }, async (req) => {
+    const { rows } = await getPool().query(
+      `SELECT DISTINCT u.cidade
+         FROM uploads u
+         LEFT JOIN clinic_accounts uca ON uca.id = u.clinic_account_id
+         LEFT JOIN empresas ue ON ue.id = u.empresa_id
+        WHERE COALESCE(uca.tenant_id, ue.tenant_id) = $1
+          AND u.deleted_at IS NULL AND NULLIF(btrim(u.cidade), '') IS NOT NULL
+        ORDER BY 1`,
+      [req.tenant!.id],
+    );
+    return rows.map((r) => r.cidade as string);
   });
 
   /** Médicos que aparecem nas fichas do assinante — alimenta o filtro. */
@@ -311,10 +573,12 @@ function vazio(base: string, inicio: string | null, fim: string | null) {
     periodo: { inicio, fim, base },
     resumo: {
       total: 0, oci: 0, cirurgia: 0, faixa_0_8: 0, faixa_9_mais: 0, sem_idade: 0,
-      registradas: 0, pendentes: 0, revisao: 0, erros: 0, medicos: 0, listas: 0,
+      registradas: 0, pendentes: 0, revisao: 0, erros: 0, oci_0_8: 0, oci_9_mais: 0,
+      medicos: 0, listas: 0, cidades: 0,
       primeira: null, ultima: null, sem_data: 0,
     },
     economia: { execucoes: 0, minutos: 0, horas: 0, custo_minuto: 0, valor: 0, funcionarios_equivalentes: 0 },
-    por_medico: [], por_mes: [], por_lista: [],
+    procedimentos: { linhas: [], total: 0, por_grupo: [] },
+    por_medico: [], por_mes: [], por_lista: [], por_cidade: [],
   };
 }
