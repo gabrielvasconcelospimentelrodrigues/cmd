@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Download, X } from 'lucide-react';
+import { Download, FileSpreadsheet, X } from 'lucide-react';
 import { apiGet, apiDownload, type ApiError } from '../../lib/api';
 import { fmtMilhar } from './parts';
 import type { FichaListada } from './Relatorios';
@@ -41,7 +41,7 @@ export default function ListaFichas({
   const [pagina, setPagina] = useState(1);
   const [carregando, setCarregando] = useState(false);
   const [aberta, setAberta] = useState<FichaListada | null>(null);
-  const [baixando, setBaixando] = useState(false);
+  const [baixando, setBaixando] = useState<'csv' | 'xlsx' | null>(null);
 
   // Mudou o filtro → volta para a primeira página, senão a tela pediria a
   // "página 7" de um resultado que agora tem duas e viria vazia.
@@ -59,14 +59,14 @@ export default function ListaFichas({
       .finally(() => { if (minha === buscaAtual.current) setCarregando(false); });
   }, [query, pagina, onErro]);
 
-  const baixar = async () => {
-    setBaixando(true);
+  const baixar = async (formato: 'csv' | 'xlsx') => {
+    setBaixando(formato);
     try {
-      await apiDownload(`/relatorios/fichas/csv?${query}`, 'fichas.csv');
+      await apiDownload(`/relatorios/fichas/${formato}?${query}`, `fichas.${formato}`);
     } catch (e) {
       onErro(msgErro(e));
     } finally {
-      setBaixando(false);
+      setBaixando(null);
     }
   };
 
@@ -79,14 +79,26 @@ export default function ListaFichas({
         <span style={{ color: 'var(--c-ink3)', fontSize: 12.5 }}>
           {carregando ? 'carregando…' : `${fmtMilhar(total)} ficha(s) no recorte`}
         </span>
-        <button
-          onClick={() => void baixar()}
-          disabled={baixando || total === 0}
-          className="ia-btn-outline"
-          style={{ padding: '0 14px', height: 34, fontSize: 12.5, opacity: baixando || total === 0 ? 0.6 : 1 }}
-        >
-          <Download size={14} /> {baixando ? 'Gerando…' : 'Baixar CSV'}
-        </button>
+        <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {/* Excel primeiro: é o formato que a maioria abre sem ajuste. O CSV
+              fica para quem vai importar em outro sistema. */}
+          <button
+            onClick={() => void baixar('xlsx')}
+            disabled={!!baixando || total === 0}
+            className="ia-btn-outline"
+            style={{ padding: '0 14px', height: 34, fontSize: 12.5, opacity: baixando || total === 0 ? 0.6 : 1 }}
+          >
+            <FileSpreadsheet size={14} /> {baixando === 'xlsx' ? 'Gerando…' : 'Excel'}
+          </button>
+          <button
+            onClick={() => void baixar('csv')}
+            disabled={!!baixando || total === 0}
+            className="ia-btn-outline"
+            style={{ padding: '0 14px', height: 34, fontSize: 12.5, opacity: baixando || total === 0 ? 0.6 : 1 }}
+          >
+            <Download size={14} /> {baixando === 'csv' ? 'Gerando…' : 'CSV'}
+          </button>
+        </span>
       </div>
 
       {total === 0 && !carregando ? (

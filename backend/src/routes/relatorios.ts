@@ -1,7 +1,8 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getPool } from '../lib/db';
 import { supabaseAdmin } from '../lib/supabase';
-import { PROC_CATARATA, PROC_OCI_0_8, PROC_OCI_9_MAIS } from '../lib/procedimentos';
+import ExcelJS from 'exceljs';
+import { PROC_CATARATA, PROC_OCI_0_8, PROC_OCI_9_MAIS, qtdProcedimentos } from '../lib/procedimentos';
 
 /**
  * RELATÓRIO ANALÍTICO DAS FICHAS IMPORTADAS.
@@ -509,6 +510,86 @@ export async function relatoriosRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /** As mesmas fichas do recorte, em CSV — o arquivo traz TUDO, não só a página. */
+  /**
+   * As mesmas fichas em XLSX (Excel).
+   *
+   * O CSV resolve a maioria dos casos, mas abre torto no Excel brasileiro: ele
+   * espera ponto e vírgula como separador e vira uma coluna só. O .xlsx já sai
+   * com tipo por coluna (data é data, idade é número), cabeçalho congelado e
+   * filtro pronto — é o que a contabilidade e a auditoria realmente usam.
+   *
+   * Usa o exceljs que o projeto já tem para LER planilhas na importação;
+   * nenhuma dependência nova entra por causa disto.
+   */
+  app.get('/relatorios/fichas/xlsx', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const r = await consultarFichas(req, reply, true);
+    if (!r) return;
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'IA-CMD';
+    wb.created = new Date();
+    const ws = wb.addWorksheet('Fichas', {
+      views: [{ state: 'frozen', ySplit: 1 }], // cabeçalho fixo ao rolar
+    });
+
+    ws.columns = [
+      { header: 'Nome', key: 'nome', width: 36 },
+      { header: 'CNS / CPF', key: 'cns', width: 16 },
+      { header: 'Nascimento', key: 'nasc', width: 13 },
+      { header: 'Atendimento', key: 'atend', width: 13 },
+      { header: 'Idade', key: 'idade', width: 8 },
+      { header: 'Modalidade', key: 'modalidade', width: 12 },
+      { header: 'CID-10', key: 'cid', width: 10 },
+      { header: 'Profissional', key: 'medico', width: 32 },
+      { header: 'Situação', key: 'situacao', width: 20 },
+      { header: 'Procedimentos', key: 'procs', width: 14 },
+      { header: 'Lista', key: 'lista', width: 30 },
+      { header: 'Cidade', key: 'cidade', width: 16 },
+      { header: 'Cadastrada em', key: 'registrada', width: 18 },
+      { header: 'Observação', key: 'obs', width: 46 },
+    ];
+
+    const cab = ws.getRow(1);
+    cab.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cab.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1D4ED8' } };
+    cab.alignment = { vertical: 'middle' };
+    cab.height = 20;
+
+    // Data como DATA de verdade (e não texto): permite ordenar e filtrar por
+    // período dentro do próprio Excel, que é metade do motivo de pedir xlsx.
+    const comoData = (iso: string | null) => (iso ? new Date(`${iso}T12:00:00Z`) : null);
+
+    for (const f of r.fichas) {
+      ws.addRow({
+        nome: f.nome,
+        cns: f.cns,
+        nasc: comoData(f.data_nascimento),
+        atend: comoData(f.data_atendimento),
+        idade: f.idade,
+        modalidade: f.modalidade === 'catarata' ? 'CIRURGIA' : 'OCI',
+        cid: f.cid10_codigo,
+        medico: f.medico_nome,
+        situacao: f.situacao,
+        procs: qtdProcedimentos(f.modalidade, f.idade),
+        lista: f.lista,
+        cidade: f.cidade ?? '',
+        registrada: f.registered_at ?? '',
+        obs: f.error_message ?? '',
+      });
+    }
+
+    ws.getColumn('nasc').numFmt = 'dd/mm/yyyy';
+    ws.getColumn('atend').numFmt = 'dd/mm/yyyy';
+    ws.autoFilter = { from: 'A1', to: { row: 1, column: ws.columnCount } };
+
+    const buf = Buffer.from(await wb.xlsx.writeBuffer());
+    const hoje = new Date().toISOString().slice(0, 10);
+    return reply
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('Content-Disposition', `attachment; filename="fichas-${hoje}.xlsx"`)
+      .send(buf);
+  });
+
   app.get('/relatorios/fichas/csv', { preHandler: [app.authenticate] }, async (req, reply) => {
     const r = await consultarFichas(req, reply, true);
     if (!r) return;
