@@ -497,6 +497,8 @@ const navFoot: React.CSSProperties = { display: 'flex', alignItems: 'center', ga
 /* ============ PAINEL (home) ============ */
 function Home({ tenant, uploads, patients, empresas = [], contas = [], filtroMembro = '', filtroEmpresa = '', onEnviar, onChange, showToast }: { tenant: Me['tenant'] | null; uploads: Upload[]; patients: Ficha[]; empresas?: { id: number; nome: string; terminais_contratados?: number }[]; contas?: ClinicAccount[]; filtroMembro?: string; filtroEmpresa?: string; onEnviar: () => void; onChange: () => Promise<void>; showToast: (t: { title: string; msg: string; kind: 'ok' | 'err' }) => void }) {
   const [robo, setRobo] = useState(false);
+  // Qual lista está transmitindo ao vivo — só UMA, pelo limite de conexões do navegador.
+  const [aoVivoId, setAoVivoId] = useState<number | null>(null);
   const [modalUpload, setModalUpload] = useState<Upload | null>(null);
   const [hoverBar, setHoverBar] = useState<number | null>(null);
   // Estatísticas REAIS (agregado no banco, sem o teto de 500 da lista /patients).
@@ -572,12 +574,43 @@ function Home({ tenant, uploads, patients, empresas = [], contas = [], filtroMem
             </div>
           </Card>
 
-          {/* Screencasts */}
+          {/* Screencasts — UMA transmissão por vez.
+
+              Antes abria um <RoboAoVivo> por lista em execução, e cada um é uma
+              conexão SSE permanente. O Chrome permite 6 conexões simultâneas por
+              domínio: com 7+ listas rodando, as transmissões tomavam todas as
+              vagas e QUALQUER outra chamada à API ficava presa na fila
+              (net::ERR_INSUFFICIENT_RESOURCES). O painel inteiro travava — nem
+              o botão de pausar funcionava, porque a requisição não saía.
+
+              Agora só a lista escolhida transmite; as outras aparecem como
+              cartão leve, sem conexão aberta. */}
           {runningUploads.map((up) => (
-            <div key={up.id} style={{ position: 'relative', minHeight: 400 }}>
-              <RoboAoVivo upload={up} />
-              <button onClick={() => { setModalUpload(up); setRobo(true); }} title="Tela cheia" style={{ position: 'absolute', top: 56, right: 14, display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(15,27,51,.7)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 11px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}><Maximize2 size={13} /> Tela cheia</button>
-            </div>
+            aoVivoId === up.id ? (
+              <div key={up.id} style={{ position: 'relative', minHeight: 400 }}>
+                <RoboAoVivo upload={up} />
+                <div style={{ position: 'absolute', top: 56, right: 14, display: 'flex', gap: 6 }}>
+                  <button onClick={() => setAoVivoId(null)} title="Fechar transmissão"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(15,27,51,.7)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 11px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Fechar</button>
+                  <button onClick={() => { setModalUpload(up); setRobo(true); }} title="Tela cheia"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(15,27,51,.7)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 11px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}><Maximize2 size={13} /> Tela cheia</button>
+                </div>
+              </div>
+            ) : (
+              <Card key={up.id} style={{ padding: 18, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ color: 'var(--c-ink)', fontSize: 14.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis' }}>{up.name || up.original_filename}</div>
+                  <div style={{ color: 'var(--c-ink3)', fontSize: 12.5, marginTop: 3 }}>
+                    {fmtMilhar(up.patients_registered)} de {fmtMilhar(up.patients_found)} cadastradas
+                    {up.current_step ? ` · ${up.current_step}` : ''}
+                  </div>
+                </div>
+                <button onClick={() => setAoVivoId(up.id)} className="ia-btn-outline"
+                  style={{ flex: 'none', padding: '0 14px', height: 34, fontSize: 12.5 }}>
+                  <Radio size={14} /> Ver ao vivo
+                </button>
+              </Card>
+            )
           ))}
         </div>
       ) : (
