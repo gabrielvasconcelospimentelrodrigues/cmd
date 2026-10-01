@@ -22,6 +22,9 @@ logs/
 # Pacote temporario do deploy (deploy-vps.ps1)
 cmd-saas-update.tar
 
+# Ferramenta de monitoramento temporaria (nao faz parte do produto)
+backend/__vigia.mjs
+
 # Sistema
 .DS_Store
 Thumbs.db
