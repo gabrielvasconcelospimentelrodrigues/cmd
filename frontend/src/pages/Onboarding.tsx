@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import jsQR from 'jsqr';
-import { Check, ArrowRight, Lock, Upload, X, ShieldCheck } from 'lucide-react';
+import { Check, ArrowRight, Lock, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { apiPost } from '../lib/api';
 import { Shell, Field, PasswordField, useTheme, useToast, Toast } from '../components/iacmd/ui';
-import { extractSecretFromQr } from '../lib/otpauth';
+import { Entrada2FA, validaChave2FA, normalizaChave2FA, PASSOS_2FA } from '../components/iacmd/Chave2FA';
 import { mascaraCpfCnpj, validaCpfCnpj } from '../lib/documento';
 
 const STEP_DATA = [
@@ -15,14 +14,6 @@ const STEP_DATA = [
   { title: 'Autorização', sub: 'Liberação do super admin' },
 ];
 const TOTAL_STEPS = 4; // etapas de preenchimento (a 5ª, Autorização, é pós-envio)
-const MFA_STEPS = [
-  'Abra o Google Authenticator no seu celular.',
-  'Toque nos três pontos (menu) e em "Transferir contas".',
-  'Toque em "Exportar contas" para gerar um QR code.',
-  'Selecione a conta do Acesso Saúde / SCPA e toque em "Avançar".',
-  'Aparece um QR code na tela — tire um print (screenshot).',
-  'Envie o print abaixo — extraímos a chave automaticamente.',
-];
 
 export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) {
   const { session, signOut } = useAuth();
@@ -39,11 +30,7 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
   const [cmdEmail, setCmdEmail] = useState('');
   const [cmdPass, setCmdPass] = useState('');
 
-  const [mfaMode, setMfaMode] = useState<'qr' | 'manual'>('qr');
-  const [fileName, setFileName] = useState('');
-  const [filePreview, setFilePreview] = useState('');
-  const [extractedKey, setExtractedKey] = useState('');
-  const [manualKey, setManualKey] = useState('');
+  const [chave2FA, setChave2FA] = useState('');
 
   const [clinicName, setClinicName] = useState(meta.clinic_name ?? '');
   const [clinicCnpj, setClinicCnpj] = useState(meta.documento ? mascaraCpfCnpj(meta.documento) : '');
@@ -55,36 +42,9 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
   const [cidOci08, setCidOci08] = useState('');
   const [cid9Mais, setCid9Mais] = useState('');
 
-  const mfaBad = mfaMode === 'qr' ? !extractedKey : manualKey.trim().length < 12;
+  const erro2FA = validaChave2FA(chave2FA);
+  const mfaBad = !!erro2FA;
   const regrasBad = !cidOci08.trim() || !cid9Mais.trim();
-
-  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    const url = URL.createObjectURL(f);
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.drawImage(img, 0, 0);
-      const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const code = jsQR(data.data, data.width, data.height);
-      const secret = code ? extractSecretFromQr(code.data) : null;
-      if (secret) {
-        setFileName(f.name);
-        setFilePreview(url);
-        setExtractedKey(secret);
-        showToast({ title: 'Chave extraída', msg: 'Lemos a chave 2FA do seu print.', kind: 'ok' });
-      } else {
-        showToast({ title: 'Não consegui ler o QR', msg: 'Tente outro print ou insira a chave manualmente.', kind: 'err' });
-        setMfaMode('manual');
-      }
-    };
-    img.src = url;
-  };
 
   const proximo = () => {
     setTouched(true);
@@ -127,7 +87,7 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
         label: cmdLabel,
         cmd_username: cmdEmail,
         cmd_password: cmdPass,
-        mfa_secret: mfaMode === 'qr' ? extractedKey : manualKey.trim().toUpperCase(),
+        mfa_secret: normalizaChave2FA(chave2FA),
         // Aloca a conta ao terminal contratado no onboarding (faturamento correto).
         empresa_id: tenant?.default_empresa_id ?? null,
         // Regras clínicas → controles da conta.
@@ -221,7 +181,7 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
                 <p style={{ color: 'var(--c-ink2)', fontSize: 14, lineHeight: 1.6, margin: '8px 0 0' }}>A IA também precisa do código 2FA para logar no sistema do governo. Siga os passos para nos enviar a chave.</p>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginTop: 22 }} data-mfa>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-                    {MFA_STEPS.map((t, i) => (
+                    {PASSOS_2FA.map((t, i) => (
                       <div key={i} style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
                         <span style={{ width: 22, height: 22, flex: 'none', borderRadius: '50%', background: 'var(--c-soft)', color: 'var(--c-softfg)', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
                         <span style={{ color: 'var(--c-ink2)', fontSize: 13, lineHeight: 1.5 }}>{t}</span>
@@ -229,41 +189,12 @@ export default function Onboarding({ onDone }: { onDone: () => Promise<void> }) 
                     ))}
                   </div>
                   <div>
-                    {mfaMode === 'qr' ? (
-                      <>
-                        {!extractedKey ? (
-                          <label style={{ display: 'block', border: `1.5px dashed ${touched && mfaBad ? 'var(--c-warn)' : 'var(--c-border2)'}`, borderRadius: 14, background: 'var(--c-input)', padding: '30px 20px', textAlign: 'center', cursor: 'pointer' }}>
-                            <input type="file" accept="image/*" onChange={onFile} style={{ display: 'none' }} />
-                            <div style={{ width: 50, height: 50, borderRadius: 13, background: 'var(--c-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto' }}>
-                              <Upload size={24} style={{ color: 'var(--c-blue)' }} />
-                            </div>
-                            <div style={{ color: 'var(--c-ink)', fontSize: 14, fontWeight: 600, marginTop: 14 }}>Clique para enviar o print do QR code</div>
-                            <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 4 }}>JPG, PNG ou qualquer imagem do celular</div>
-                          </label>
-                        ) : (
-                          <div style={{ border: '1.5px solid var(--c-ok)', borderRadius: 14, background: 'var(--c-oksoft)', padding: 18, animation: 'ia-slide .2s ease' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                              {filePreview && <img src={filePreview} alt="print" style={{ width: 54, height: 54, borderRadius: 10, objectFit: 'cover', border: '1px solid var(--c-border)' }} />}
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ color: 'var(--c-ink)', fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileName}</div>
-                                <div style={{ color: 'var(--c-okfg)', fontSize: 12, fontWeight: 600, marginTop: 2 }}>Chave extraída automaticamente</div>
-                              </div>
-                              <button onClick={() => { setExtractedKey(''); setFileName(''); setFilePreview(''); }} style={{ width: 30, height: 30, flex: 'none', border: 'none', background: 'transparent', color: 'var(--c-ink3)', cursor: 'pointer' }}><X size={17} /></button>
-                            </div>
-                            <div className="ia-mono" style={{ marginTop: 12, letterSpacing: '.04em', color: 'var(--c-ink)', background: 'var(--c-input)', border: '1px solid var(--c-border)', borderRadius: 8, padding: '10px 12px' }}>{extractedKey}</div>
-                          </div>
-                        )}
-                        <div onClick={() => setMfaMode('manual')} className="ia-link" style={{ marginTop: 14, textAlign: 'center', fontSize: 13 }}>Prefiro inserir a chave manualmente</div>
-                      </>
-                    ) : (
-                      <>
-                        <Field label="Chave TOTP" error={touched && mfaBad ? 'A chave parece curta — confira antes de continuar.' : undefined}>
-                          <input className={`ia-input ia-mono ${touched && mfaBad ? 'err' : ''}`} value={manualKey} onChange={(e) => setManualKey(e.target.value.toUpperCase())} placeholder="JBSWY3DPEHPK3PXP" style={{ letterSpacing: '.06em' }} />
-                        </Field>
-                        <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 6 }}>Cole aqui a chave no formato JBSWY3DPEHPK3PXP.</div>
-                        <div onClick={() => setMfaMode('qr')} className="ia-link" style={{ marginTop: 14, textAlign: 'center', fontSize: 13 }}>Voltar a enviar o print do QR code</div>
-                      </>
-                    )}
+                    <Entrada2FA
+                      chave={chave2FA}
+                      onChave={setChave2FA}
+                      erro={touched ? erro2FA ?? undefined : undefined}
+                      showToast={showToast}
+                    />
                   </div>
                 </div>
               </div>

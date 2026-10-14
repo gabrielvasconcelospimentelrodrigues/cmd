@@ -7,6 +7,7 @@ import { Card, Switch } from './parts';
 import { mascaraCpfCnpj, validaCpfCnpj, soDigitos } from '../../lib/documento';
 import { Field, PasswordField } from '../../components/iacmd/ui';
 import type { ToastData } from '../../components/iacmd/ui';
+import { Entrada2FA, validaChave2FA, normalizaChave2FA } from '../../components/iacmd/Chave2FA';
 
 const DIAS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
 const DELAYS = [{ label: 'Imediato', v: 0 }, { label: '1 minuto', v: 1 }, { label: '2 minutos', v: 2 }, { label: '1 hora', v: 60 }];
@@ -240,7 +241,7 @@ function AccountCard({ conta, empresas, membros = [], isMember = false, onChange
         <button onClick={salvar} disabled={salvando} className="ia-btn" style={{ padding: '11px 22px', fontSize: 14 }}>{salvando ? 'Salvando…' : 'Salvar'}</button>
       </div>
 
-      {editCred && <EditCred conta={conta} onClose={() => setEditCred(false)} onSaved={async () => { setEditCred(false); await onChange(); showToast({ title: 'Credenciais atualizadas', msg: '', kind: 'ok' }); }} onErr={(m) => showToast({ title: 'Falha', msg: m, kind: 'err' })} />}
+      {editCred && <EditCred conta={conta} showToast={showToast} onClose={() => setEditCred(false)} onSaved={async () => { setEditCred(false); await onChange(); showToast({ title: 'Credenciais atualizadas', msg: '', kind: 'ok' }); }} onErr={(m) => showToast({ title: 'Falha', msg: m, kind: 'err' })} />}
     </Card>
   );
 }
@@ -248,33 +249,63 @@ function AccountCard({ conta, empresas, membros = [], isMember = false, onChange
 function Overlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(7,11,22,.62)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div onClick={(e) => e.stopPropagation()} className="ia-card" style={{ width: 420, maxWidth: '100%', padding: 26, animation: 'ia-slide .22s ease' }}>{children}</div>
+      <div onClick={(e) => e.stopPropagation()} className="ia-card" style={{ width: 420, maxWidth: '100%', maxHeight: '88vh', overflowY: 'auto', padding: 26, animation: 'ia-slide .22s ease' }}>{children}</div>
     </div>
   );
 }
 
-function EditCred({ conta, onClose, onSaved, onErr }: { conta: ClinicAccount; onClose: () => void; onSaved: () => Promise<void>; onErr: (m: string) => void }) {
+function EditCred({ conta, onClose, onSaved, onErr, showToast }: { conta: ClinicAccount; onClose: () => void; onSaved: () => Promise<void>; onErr: (m: string) => void; showToast: (t: ToastData) => void }) {
   const [user, setUser] = useState(conta.cmd_username);
   const [pass, setPass] = useState('');
+  // A chave 2FA só é tocada quando a pessoa pede. Um campo sempre aberto
+  // convida a digitar algo ali — e o que for digitado substitui a chave boa.
+  const [trocar2FA, setTrocar2FA] = useState(false);
   const [mfa, setMfa] = useState('');
+  const [erro2FA, setErro2FA] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+
   const salvar = async () => {
+    const patch: Record<string, string> = { cmd_username: user };
+    if (pass) patch.cmd_password = pass;
+    if (trocar2FA) {
+      const motivo = validaChave2FA(mfa);
+      if (motivo) return setErro2FA(motivo);
+      patch.mfa_secret = normalizaChave2FA(mfa);
+    }
     setBusy(true);
     try {
-      const patch: Record<string, string> = { cmd_username: user };
-      if (pass) patch.cmd_password = pass;
-      if (mfa) patch.mfa_secret = mfa;
       await apiPatch(`/clinic-accounts/${conta.id}`, patch);
       await onSaved();
     } catch (e) { onErr((e as Error).message); setBusy(false); }
   };
+
   return (
     <Overlay onClose={onClose}>
       <h3 style={{ color: 'var(--c-ink)', fontSize: 18, fontWeight: 700, margin: 0 }}>Editar credenciais</h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 16 }}>
         <Field label="Usuário CMD-COLETA"><input className="ia-input ia-mono" value={user} onChange={(e) => setUser(e.target.value)} /></Field>
         <Field label="Nova senha (deixe vazio p/ manter)"><PasswordField value={pass} onChange={setPass} placeholder="••••••••" mono /></Field>
-        <Field label="Nova chave 2FA (opcional)"><input className="ia-input ia-mono" value={mfa} onChange={(e) => setMfa(e.target.value.toUpperCase())} placeholder="JBSWY3DPEHPK3PXP" /></Field>
+
+        {!trocar2FA ? (
+          <div style={{ border: '1px solid var(--c-border)', borderRadius: 10, background: 'var(--c-input)', padding: '12px 14px' }}>
+            <div style={{ color: 'var(--c-ink)', fontSize: 13, fontWeight: 600 }}>Chave 2FA mantida</div>
+            <div style={{ color: 'var(--c-ink3)', fontSize: 12, marginTop: 4, lineHeight: 1.5 }}>
+              Trocar a senha do gov.br não muda a chave 2FA. Só troque a chave se você recadastrou o aplicativo autenticador.
+            </div>
+            <button onClick={() => setTrocar2FA(true)} className="ia-link" style={{ marginTop: 10, fontSize: 13, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>Trocar a chave 2FA</button>
+          </div>
+        ) : (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+              <div style={{ color: 'var(--c-ink)', fontSize: 13, fontWeight: 600 }}>Nova chave 2FA</div>
+              <button onClick={() => { setTrocar2FA(false); setMfa(''); setErro2FA(undefined); }} className="ia-link" style={{ fontSize: 12, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>Manter a atual</button>
+            </div>
+            <div style={{ color: 'var(--c-ink3)', fontSize: 12, margin: '6px 0 12px', lineHeight: 1.5 }}>
+              No gov.br, em Verificação em duas etapas, recadastre o aplicativo autenticador. Envie o print do QR code que aparece e a chave é extraída sozinha.
+            </div>
+            <Entrada2FA chave={mfa} onChave={(v) => { setMfa(v); setErro2FA(undefined); }} erro={erro2FA} showToast={showToast} />
+          </div>
+        )}
       </div>
       <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
         <button onClick={onClose} className="ia-btn-outline" style={{ flex: 1 }}>Cancelar</button>

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { supabaseAdmin } from '../lib/supabase';
 import { encrypt } from '../lib/crypto';
+import { validarChave2FA } from '../lib/chave2fa';
 import { registrarLog, ator, atorNome } from '../lib/audit';
 import { verificarAcessoAutomacao, isencaoVigente } from '../lib/acesso';
 import { calcularProporcionalProximoTerminal, liberarTerminal } from '../lib/terminais';
@@ -132,6 +133,15 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
+    // Chave 2FA: validada quando informada. Conta sem 2FA continua possível,
+    // mas chave inválida nunca entra — o robô só descobriria no login.
+    let mfaCifrada = encrypt('');
+    if (typeof body.mfa_secret === 'string' && body.mfa_secret.trim() !== '') {
+      const r = validarChave2FA(body.mfa_secret);
+      if (!r.ok) return reply.code(400).send({ error: r.erro });
+      mfaCifrada = encrypt(r.valor);
+    }
+
     const { data, error } = await supabaseAdmin
       .from('clinic_accounts')
       .insert({
@@ -139,7 +149,7 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
         label: body.label,
         cmd_username: body.cmd_username,
         cmd_password_encrypted: encrypt(body.cmd_password),
-        mfa_secret_encrypted: encrypt(body.mfa_secret ?? ''),
+        mfa_secret_encrypted: mfaCifrada,
         empresa_id: body.empresa_id ? Number(body.empresa_id) : null,
         // Vincula ao membro quando quem conecta é membro de equipe.
         member_user_id: req.member ? req.member.user_id : null,
@@ -192,7 +202,13 @@ export async function clinicRoutes(app: FastifyInstance): Promise<void> {
     // Edição de credenciais (cifra senha/MFA).
     if (typeof body.cmd_username === 'string') patch.cmd_username = body.cmd_username;
     if (typeof body.cmd_password === 'string' && body.cmd_password) patch.cmd_password_encrypted = encrypt(body.cmd_password);
-    if (typeof body.mfa_secret === 'string') patch.mfa_secret_encrypted = encrypt(body.mfa_secret);
+    // Chave 2FA: só é tocada quando vem preenchida E válida. Vazia significa
+    // "manter a atual" — antes ela apagava a chave do cliente.
+    if (typeof body.mfa_secret === 'string' && body.mfa_secret.trim() !== '') {
+      const r = validarChave2FA(body.mfa_secret);
+      if (!r.ok) return reply.code(400).send({ error: r.erro });
+      patch.mfa_secret_encrypted = encrypt(r.valor);
+    }
 
     // Membro não muda a empresa do próprio terminal (fica na empresa dele).
     if (req.member) delete patch.empresa_id;
