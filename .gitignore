@@ -23,7 +23,7 @@ logs/
 cmd-saas-update.tar
 
 # Ferramenta de monitoramento temporaria (nao faz parte do produto)
-backend/__vigia.mjs
+backend/__*
 
 # Sistema
 .DS_Store
