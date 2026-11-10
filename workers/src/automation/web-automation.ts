@@ -150,6 +150,8 @@ export interface AutomatorOpts {
   // Controles clínicos: CID escolhido pela idade (calculada da data de nascimento).
   cidOci0a8?: string; // paciente de OCI de 0 a 8 anos
   cid9Mais?: string; // paciente acima de 9 anos
+  // Perfil a selecionar DENTRO do CMD-COLETA depois do login. Vazio = nao mexe.
+  perfilCmd?: string;
   // Corta o login no meio se o usuário parou/pausou/excluiu o envio — assim o
   // laço de até 5 min não segue rodando "fantasma" com o navegador aberto.
   abortou?: () => Promise<boolean>;
@@ -456,7 +458,77 @@ export class WebAutomator {
     }
 
     await this.dispensarModalSair();
+    await this.selecionarPerfilCmd();
     this.passo('Login concluído — CMD-COLETA aberto.');
+  }
+
+  /**
+   * Troca o PERFIL dentro do CMD-COLETA (coluna azul da esquerda).
+   *
+   * Numa das contas o perfil que abre por padrão ("Administrador - Unidades
+   * Móveis") não enxerga os profissionais: a busca por médico volta VAZIA e
+   * toda ficha cai em Pendências com "não encontrado no portal". Trocar para o
+   * perfil certo recarrega a tela com os vínculos corretos.
+   *
+   * Só age quando a conta tem perfil configurado; nas demais não faz nada.
+   * Falhar aqui NÃO derruba o login: a conta pode já estar no perfil certo, e
+   * derrubar o login por causa disso custaria a lista inteira.
+   */
+  private async selecionarPerfilCmd(): Promise<void> {
+    const alvo = (this.opts.perfilCmd ?? '').trim();
+    const page = this.page;
+    if (!alvo || !page) return;
+
+    // Já está no perfil certo? Não mexe — evita recarregar a cada relogin.
+    const jaEsta = await page.getByText(alvo, { exact: true }).first()
+      .isVisible({ timeout: 2500 }).catch(() => false);
+    if (jaEsta) {
+      this.passo(`Perfil "${alvo}" já ativo no CMD.`);
+      return;
+    }
+
+    this.passo(`Trocando o perfil do CMD para "${alvo}"...`);
+    const busca = page.locator('input[placeholder*="por perfil" i]').first();
+
+    // O seletor fica sob o rótulo PERFIL. Tenta os caminhos até o campo de
+    // busca aparecer — é ele que confirma que o modal abriu de verdade.
+    const formasDeAbrir = [
+      () => page.locator('xpath=//*[normalize-space(text())="PERFIL"]/following::*[1]').first().click({ timeout: 4000 }),
+      () => page.getByText('PERFIL', { exact: true }).first().click({ timeout: 4000 }),
+      () => page.locator('xpath=//*[normalize-space(text())="PERFIL"]/..').first().click({ timeout: 4000 }),
+    ];
+    let abriu = false;
+    for (const abrir of formasDeAbrir) {
+      await abrir().catch(() => {});
+      abriu = await busca.isVisible({ timeout: 2500 }).catch(() => false);
+      if (abriu) break;
+    }
+    if (!abriu) {
+      this.passo('Não consegui abrir o seletor de perfil — seguindo com o perfil atual.');
+      return;
+    }
+
+    // Filtra e escolhe. Com o filtro aplicado, o texto exato do alvo só existe
+    // na opção da lista — o cabeçalho do modal mostra o perfil ATUAL, que é outro.
+    await busca.fill(alvo).catch(() => {});
+    await page.waitForTimeout(600);
+    const clicou = await page.getByText(alvo, { exact: true }).last()
+      .click({ timeout: 6000 }).then(() => true).catch(() => false);
+    if (!clicou) {
+      this.passo('Não consegui clicar no perfil — seguindo com o perfil atual.');
+      await page.keyboard.press('Escape').catch(() => {});
+      return;
+    }
+
+    // A troca recarrega a tela e o portal mostra um "loading" por alguns
+    // segundos. Espera o mínimo observado e depois a lista voltar.
+    await page.waitForTimeout(5000);
+    await page.getByRole('button', { name: 'Incluir contato assistencial' }).first()
+      .waitFor({ state: 'visible', timeout: 45_000 }).catch(() => {});
+
+    const trocou = await page.getByText(alvo, { exact: true }).first()
+      .isVisible({ timeout: 4000 }).catch(() => false);
+    this.passo(trocou ? `Perfil do CMD trocado para "${alvo}".` : 'O perfil pode não ter trocado — seguindo mesmo assim.');
   }
 
   private async dispensarModalSair(): Promise<void> {

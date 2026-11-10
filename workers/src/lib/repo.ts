@@ -15,6 +15,8 @@ export interface ContaInfo extends JanelaConfig {
   cid_oci_0_8: string; // OCI de 0 a 8 anos
   cid_9_mais: string; // acima de 9 anos
   delay_inicio_minutos: number;
+  // Perfil a selecionar DENTRO do CMD-COLETA apos o login (null = nao mexer).
+  cmd_perfil: string | null;
 }
 
 export interface UploadComConta {
@@ -403,7 +405,7 @@ export async function getUploadComConta(uploadId: number): Promise<UploadComCont
     .from('uploads')
     .select(
       'id, status, clinic_account_id, empresa_id, terminal_slot, file_path, mapeamento_campos, patients_registered, patients_errored, registro_iniciado_em, retry_rounds, ' +
-        'clinic_accounts:clinic_account_id (id, tenant_id, empresa_id, is_enabled, cmd_username, cmd_password_encrypted, mfa_secret_encrypted, cid_padrao, cid_oci_0_8, cid_9_mais, dias_execucao, horario_inicio_execucao, horario_fim_execucao, pausa_inicio, pausa_fim, delay_inicio_minutos)',
+        'clinic_accounts:clinic_account_id (id, tenant_id, empresa_id, is_enabled, cmd_username, cmd_password_encrypted, mfa_secret_encrypted, cid_padrao, cid_oci_0_8, cid_9_mais, cmd_perfil, dias_execucao, horario_inicio_execucao, horario_fim_execucao, pausa_inicio, pausa_fim, delay_inicio_minutos)',
     )
     .eq('id', uploadId)
     .single();

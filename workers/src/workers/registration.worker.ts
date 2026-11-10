@@ -208,6 +208,8 @@ export function startRegistrationWorker(): Worker<UploadJob> {
             // CID por idade (controles): 0–8 anos vs 9+ (fallback H53 dentro do motor).
             cidOci0a8: conta.cid_oci_0_8,
             cid9Mais: conta.cid_9_mais,
+            // Perfil interno do CMD (so as contas que precisam o tem gravado).
+            perfilCmd: conta.cmd_perfil ?? undefined,
           });
           let precisaRetomar = false; // travou → pausa, alerta, retoma em 30s
           let abortado = false; // usuário parou/excluiu durante o login → para limpo
