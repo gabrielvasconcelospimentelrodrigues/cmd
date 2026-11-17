@@ -1,4 +1,4 @@
-import { chromium, type Browser, type BrowserContext, type Page, type CDPSession } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page, type CDPSession, type Response } from 'playwright';
 import { connection } from '../lib/redis';
 import { generateTotp } from './totp';
 import { limparNomeMedico } from '../extractors/aliases';
@@ -160,6 +160,40 @@ export interface AutomatorOpts {
 /** Login interrompido porque o usuário parou/excluiu o envio (não é erro real). */
 export class LoginAbortadoError extends Error {}
 
+/**
+ * O firewall do portal recusou a conexão do nosso servidor (HTTP 403), antes
+ * de qualquer tela de login. É erro à parte porque a conduta é outra: não
+ * adianta repetir, e a lista precisa parar em vez de tentar a cada 30s.
+ */
+export class PortalBloqueadoError extends Error {}
+
+/**
+ * Saída do navegador por proxy, vinda de PROXY_URL — por exemplo
+ * `http://usuario:senha@host:3128` ou `socks5://host:1080`.
+ *
+ * Existe porque o portal do governo bloqueou o IP do nosso servidor: um portal
+ * de saúde brasileiro recebendo acesso de datacenter estrangeiro é o padrão
+ * que esses firewalls barram. Apontando o proxy para uma saída no Brasil, a
+ * automação chega de onde o portal espera receber.
+ *
+ * Sem a variável nada muda — o navegador sai direto, como sempre saiu.
+ */
+function proxyDoAmbiente(): { server: string; username?: string; password?: string } | null {
+  const bruto = (process.env.PROXY_URL ?? '').trim();
+  if (!bruto) return null;
+  try {
+    const u = new URL(bruto);
+    const server = `${u.protocol}//${u.host}`;
+    const usuario = decodeURIComponent(u.username || '');
+    const senha = decodeURIComponent(u.password || '');
+    return usuario ? { server, username: usuario, password: senha } : { server };
+  } catch {
+    console.log('[proxy] PROXY_URL inválida — ignorando e saindo direto.');
+    return null;
+  }
+}
+
+
 export class WebAutomator {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
@@ -173,11 +207,14 @@ export class WebAutomator {
   }
 
   async start(): Promise<void> {
+    // Saida por proxy quando PROXY_URL existe (ver proxyDoAmbiente).
+    const proxy = proxyDoAmbiente();
+    const base = { headless: this.opts.headless ?? true, ...(proxy ? { proxy } : {}) };
     // Tenta Chrome instalado; cai para o Chromium do Playwright.
     try {
-      this.browser = await chromium.launch({ headless: this.opts.headless ?? true, channel: 'chrome' });
+      this.browser = await chromium.launch({ ...base, channel: 'chrome' });
     } catch {
-      this.browser = await chromium.launch({ headless: this.opts.headless ?? true });
+      this.browser = await chromium.launch(base);
     }
     this.context = await this.browser.newContext({ viewport: { width: 1280, height: 800 } });
     this.page = await this.context.newPage();
@@ -317,7 +354,8 @@ export class WebAutomator {
     if (!this.page) await this.start();
     const page = this.page!;
     this.passo('Abrindo o portal Acesso Saúde...');
-    await page.goto(URL_LOGIN);
+    const resposta = await page.goto(URL_LOGIN);
+    await this.conferirBloqueioDoPortal(page, resposta);
 
     // Tela inicial do app pode ter um botão "Entrar" antes do formulário.
     await page.getByRole('button', { name: 'Entrar', exact: true }).click({ timeout: 5000 }).catch(() => {});
@@ -529,6 +567,26 @@ export class WebAutomator {
     const trocou = await page.getByText(alvo, { exact: true }).first()
       .isVisible({ timeout: 4000 }).catch(() => false);
     this.passo(trocou ? `Perfil do CMD trocado para "${alvo}".` : 'O perfil pode não ter trocado — seguindo mesmo assim.');
+  }
+
+  /**
+   * O portal fica atrás de um firewall (F5) que pode recusar o IP de saída do
+   * servidor. Quando recusa, a tela de login nem carrega — e sem esta checagem
+   * o sintoma só aparecia 5 minutos depois como "não foi possível chegar à tela
+   * Contatos Assistenciais", erro que aponta para o lugar errado. Foi o que
+   * deixou a operação parada 4 dias sem ninguém entender o motivo.
+   */
+  private async conferirBloqueioDoPortal(page: Page, resposta: Response | null): Promise<void> {
+    const status = resposta?.status() ?? 0;
+    const corpo = await page.content().catch(() => '');
+    const recusado = /The requested URL was rejected|Error 403 - Forbidden/i.test(corpo);
+    if (status !== 403 && !recusado) return;
+    const id = corpo.match(/support ID is\s*([0-9a-f-]+)/i)?.[1] ?? '';
+    throw new PortalBloqueadoError(
+      `O portal do governo recusou a conexão do nosso servidor (HTTP ${status || 403}). ` +
+        'Não é senha nem 2FA: o acesso é barrado antes da tela de login.' +
+        (id ? ` Identificador de suporte do portal: ${id}.` : ''),
+    );
   }
 
   private async dispensarModalSair(): Promise<void> {

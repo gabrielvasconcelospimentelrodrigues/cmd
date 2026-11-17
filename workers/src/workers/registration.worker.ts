@@ -9,7 +9,7 @@ import { proximaJanelaPermitida } from '../scheduling';
 import { verificarAcessoAutomacao } from '../lib/acesso';
 import { withLock } from '../lib/lock';
 import { decrypt } from '../lib/crypto';
-import { WebAutomator, ProfessionalNotFoundError, LoginAbortadoError, calcularIdade, type PatientData } from '../automation/web-automation';
+import { WebAutomator, ProfessionalNotFoundError, LoginAbortadoError, PortalBloqueadoError, calcularIdade, type PatientData } from '../automation/web-automation';
 import { getMotorConfig, MOTOR_CONFIG_PADRAO } from '../lib/motor-config';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -213,6 +213,7 @@ export function startRegistrationWorker(): Worker<UploadJob> {
           });
           let precisaRetomar = false; // travou → pausa, alerta, retoma em 30s
           let abortado = false; // usuário parou/excluiu durante o login → para limpo
+          let bloqueado = false; // o portal recusou o IP do servidor → parar e avisar
           try {
             await automator.start();
             try {
@@ -221,6 +222,14 @@ export function startRegistrationWorker(): Worker<UploadJob> {
               if (e instanceof LoginAbortadoError) {
                 await logEntry(uploadId, 'WARN', 'Login interrompido — envio parado/excluído pelo usuário.');
                 abortado = true;
+              } else if (e instanceof PortalBloqueadoError) {
+                // Sem acesso ao portal nada anda: insistir a cada 30s so acumula
+                // tentativa e esconde a causa. Pausa de verdade (flag no Redis,
+                // senao o watchdog reenfileira) e deixa o motivo no log.
+                await logEntry(uploadId, 'ERROR', `⛔ ${(e as Error).message} Lista pausada — repetir não resolve.`);
+                await connection.set(`ctrl:pause:${uploadId}`, '1', 'EX', 86400).catch(() => {});
+                abortado = true;
+                bloqueado = true;
               } else {
                 await logEntry(uploadId, 'WARN', `⚠ Automação ${(e as Error).message} no login. Pausando e retomando em 30s de onde parou (${registered} já cadastrado(s)).`);
                 precisaRetomar = true;
@@ -316,6 +325,12 @@ export function startRegistrationWorker(): Worker<UploadJob> {
             // close() pode PENDURAR se a página crashou — com teto para não
             // segurar o worker (e não deixar o navegador preso/vazando).
             await comTimeout(automator.close(), 30_000, 'close').catch(() => {});
+          }
+
+          if (bloqueado) {
+            // Mantem o motivo visivel no painel, em vez do passo vazio.
+            await setUploadStatus(uploadId, 'paused', { current_step: 'Portal do governo bloqueou o acesso do nosso servidor' });
+            return 'parado';
           }
 
           if (abortado) {
